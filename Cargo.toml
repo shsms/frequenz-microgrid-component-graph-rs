@@ -1,0 +1,8 @@
+[package]
+name = "frequenz-microgrid-component-graph"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "frequenz_microgrid_component_graph"
+path = "src/lib.rs"
