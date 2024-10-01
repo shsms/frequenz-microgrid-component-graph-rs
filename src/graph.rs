@@ -5,6 +5,9 @@
 //! microgrid, and the connections between them.
 
 mod creation;
+mod retrieval;
+
+pub mod iterators;
 
 use crate::{Edge, Node};
 use petgraph::graph::{DiGraph, NodeIndex};
