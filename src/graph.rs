@@ -6,6 +6,7 @@
 
 mod creation;
 mod retrieval;
+mod validation;
 
 pub mod iterators;
 
