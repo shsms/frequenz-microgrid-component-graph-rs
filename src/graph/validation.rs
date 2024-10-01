@@ -3,6 +3,7 @@
 
 //! Methods for validating a [`ComponentGraph`].
 
+mod invariant_checks;
 mod validate_graph;
 
 use crate::{ComponentGraph, Edge, Error, Node};
