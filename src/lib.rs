@@ -5,7 +5,7 @@ mod component_category;
 pub use component_category::{ComponentCategory, InverterType};
 
 mod graph;
-pub use graph::ComponentGraph;
+pub use graph::{iterators, ComponentGraph};
 
 mod graph_traits;
 pub use graph_traits::{Edge, Node};
