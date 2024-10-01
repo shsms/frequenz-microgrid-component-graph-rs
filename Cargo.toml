@@ -6,3 +6,6 @@ edition = "2021"
 [lib]
 name = "frequenz_microgrid_component_graph"
 path = "src/lib.rs"
+
+[dependencies]
+petgraph = "0.6.5"
