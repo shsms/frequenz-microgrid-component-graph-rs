@@ -4,6 +4,7 @@
 //! This module defines the `ComponentCategory` enum, which represents the
 //! category of a component.
 
+use crate::graph_traits::Node;
 use std::fmt::Display;
 
 /// Represents the type of an inverter.
@@ -71,3 +72,50 @@ impl Display for ComponentCategory {
         }
     }
 }
+
+/// Predicates for checking the component category of a `Node`.
+pub(crate) trait CategoryPredicates: Node {
+    fn is_unspecified(&self) -> bool {
+        self.category() == ComponentCategory::Unspecified
+    }
+
+    fn is_grid(&self) -> bool {
+        self.category() == ComponentCategory::Grid
+    }
+
+    fn is_meter(&self) -> bool {
+        self.category() == ComponentCategory::Meter
+    }
+
+    fn is_battery(&self) -> bool {
+        self.category() == ComponentCategory::Battery
+    }
+
+    fn is_inverter(&self) -> bool {
+        matches!(self.category(), ComponentCategory::Inverter(_))
+    }
+
+    fn is_battery_inverter(&self) -> bool {
+        self.category() == ComponentCategory::Inverter(InverterType::Battery)
+    }
+
+    fn is_pv_inverter(&self) -> bool {
+        self.category() == ComponentCategory::Inverter(InverterType::Solar)
+    }
+
+    fn is_unspecified_inverter(&self) -> bool {
+        self.category() == ComponentCategory::Inverter(InverterType::Unspecified)
+    }
+
+    fn is_ev_charger(&self) -> bool {
+        self.category() == ComponentCategory::EvCharger
+    }
+
+    fn is_chp(&self) -> bool {
+        self.category() == ComponentCategory::Chp
+    }
+}
+
+/// Implement the `CategoryPredicates` trait for all types that implement the
+/// `Node` trait.
+impl<T: Node> CategoryPredicates for T {}
