@@ -5,6 +5,7 @@
 
 mod invariant_checks;
 mod validate_graph;
+mod validate_neighbors;
 
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -33,6 +34,13 @@ where
 
     validator.validate_acyclicity(root, vec![])?;
     validator.validate_connected_graph(root)?;
+
+    validator.validate_root()?;
+    validator.validate_meters()?;
+    validator.validate_inverters()?;
+    validator.validate_batteries()?;
+    validator.validate_ev_chargers()?;
+    validator.validate_chps()?;
 
     Ok(())
 }
