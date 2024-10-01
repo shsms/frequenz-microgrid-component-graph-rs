@@ -5,6 +5,7 @@
 //! microgrid, and the connections between them.
 
 mod creation;
+mod meter_roles;
 mod retrieval;
 mod validation;
 
