@@ -139,6 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component_category::BatteryType;
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::InverterType;
@@ -221,14 +222,15 @@ mod tests {
         let components = vec![
             TestComponent(1, ComponentCategory::Grid),
             TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Battery),
+            TestComponent(3, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
         assert!(
             ComponentGraph::try_new(components, connections).is_err_and(|e| {
-                e == Error::invalid_graph(
-                    "Meter:2 can only have successors that are not Batteries. Found Battery:3.",
-                )
+                e == Error::invalid_graph(concat!(
+                    "Meter:2 can only have successors that are not Batteries. ",
+                    "Found Battery(LiIon):3."
+                ))
             }),
         );
     }
@@ -268,7 +270,10 @@ mod tests {
             }),
         );
 
-        components.push(TestComponent(4, ComponentCategory::Battery));
+        components.push(TestComponent(
+            4,
+            ComponentCategory::Battery(BatteryType::LiIon),
+        ));
         connections.push(TestConnection::new(3, 4));
 
         assert!(ComponentGraph::try_new(components, connections).is_ok());
@@ -328,7 +333,10 @@ mod tests {
 
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
 
-        components.push(TestComponent(4, ComponentCategory::Battery));
+        components.push(TestComponent(
+            4,
+            ComponentCategory::Battery(BatteryType::LiIon),
+        ));
         connections.push(TestConnection::new(3, 4));
 
         assert!(ComponentGraph::try_new(components, connections).is_ok());
@@ -340,8 +348,8 @@ mod tests {
             TestComponent(1, ComponentCategory::Grid),
             TestComponent(2, ComponentCategory::Meter),
             TestComponent(3, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(4, ComponentCategory::Battery),
-            TestComponent(5, ComponentCategory::Battery),
+            TestComponent(4, ComponentCategory::Battery(BatteryType::NaIon)),
+            TestComponent(5, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -351,7 +359,9 @@ mod tests {
         ];
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| {
-                e == Error::invalid_graph("Battery:4 can't have any successors. Found Battery:5.")
+                e == Error::invalid_graph(
+                    "Battery(NaIon):4 can't have any successors. Found Battery(LiIon):5.",
+                )
             }),
         );
 
@@ -367,20 +377,23 @@ mod tests {
             3,
             ComponentCategory::Inverter(InverterType::Hybrid),
         ));
-        components.push(TestComponent(4, ComponentCategory::Battery));
+        components.push(TestComponent(
+            4,
+            ComponentCategory::Battery(BatteryType::LiIon),
+        ));
 
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
 
         let components = vec![
             TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Battery),
+            TestComponent(2, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2)];
 
         assert!(
             ComponentGraph::try_new(components, connections).is_err_and(|e| {
                 e == Error::invalid_graph(concat!(
-                    "Battery:2 can only have predecessors that are ",
+                    "Battery(LiIon):2 can only have predecessors that are ",
                     "BatteryInverters or HybridInverters. Found Grid:1."
                 ))
             }),

@@ -131,6 +131,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component_category::BatteryType;
     use crate::error::Error;
     use crate::ComponentCategory;
     use crate::InverterType;
@@ -177,10 +178,10 @@ mod tests {
             TestComponent(2, ComponentCategory::Meter),
             TestComponent(3, ComponentCategory::Meter),
             TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(5, ComponentCategory::Battery),
+            TestComponent(5, ComponentCategory::Battery(BatteryType::NaIon)),
             TestComponent(6, ComponentCategory::Meter),
             TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(8, ComponentCategory::Battery),
+            TestComponent(8, ComponentCategory::Battery(BatteryType::Unspecified)),
             TestComponent(9, ComponentCategory::Meter),
             TestComponent(10, ComponentCategory::Inverter(InverterType::Solar)),
             TestComponent(11, ComponentCategory::Inverter(InverterType::Solar)),
@@ -190,7 +191,7 @@ mod tests {
             TestComponent(15, ComponentCategory::Chp),
             TestComponent(16, ComponentCategory::Inverter(InverterType::Solar)),
             TestComponent(17, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(18, ComponentCategory::Battery),
+            TestComponent(18, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![
             // Single Grid meter
@@ -239,7 +240,10 @@ mod tests {
             22,
             ComponentCategory::Inverter(InverterType::Battery),
         ));
-        components.push(TestComponent(23, ComponentCategory::Battery));
+        components.push(TestComponent(
+            23,
+            ComponentCategory::Battery(BatteryType::Unspecified),
+        ));
         connections.push(TestConnection::new(20, 21));
         connections.push(TestConnection::new(21, 22));
         connections.push(TestConnection::new(22, 23));

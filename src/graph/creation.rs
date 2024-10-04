@@ -117,6 +117,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component_category::BatteryType;
     use crate::ComponentCategory;
     use crate::InverterType;
 
@@ -161,8 +162,8 @@ mod tests {
             TestComponent(6, ComponentCategory::Meter),
             TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent(3, ComponentCategory::Meter),
-            TestComponent(5, ComponentCategory::Battery),
-            TestComponent(8, ComponentCategory::Battery),
+            TestComponent(5, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent(8, ComponentCategory::Battery(BatteryType::Unspecified)),
             TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent(2, ComponentCategory::Meter),
         ];

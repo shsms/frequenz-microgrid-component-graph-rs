@@ -77,6 +77,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component_category::BatteryType;
+    use crate::component_category::CategoryPredicates;
     use crate::error::Error;
     use crate::ComponentCategory;
     use crate::InverterType;
@@ -123,8 +125,8 @@ mod tests {
             TestComponent(1, ComponentCategory::Grid),
             TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent(3, ComponentCategory::Meter),
-            TestComponent(5, ComponentCategory::Battery),
-            TestComponent(8, ComponentCategory::Battery),
+            TestComponent(5, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent(8, ComponentCategory::Battery(BatteryType::LiIon)),
             TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent(2, ComponentCategory::Meter),
         ];
@@ -152,7 +154,10 @@ mod tests {
         );
         assert_eq!(
             graph.component(5),
-            Ok(&TestComponent(5, ComponentCategory::Battery))
+            Ok(&TestComponent(
+                5,
+                ComponentCategory::Battery(BatteryType::Unspecified)
+            ))
         );
         assert_eq!(
             graph.component(9),
@@ -168,13 +173,10 @@ mod tests {
         let graph = ComponentGraph::try_new(components.clone(), connections.clone())?;
 
         assert!(graph.components().eq(&components));
-        assert!(graph
-            .components()
-            .filter(|x| x.category() == ComponentCategory::Battery)
-            .eq(&[
-                TestComponent(5, ComponentCategory::Battery),
-                TestComponent(8, ComponentCategory::Battery)
-            ]));
+        assert!(graph.components().filter(|x| x.is_battery()).eq(&[
+            TestComponent(5, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent(8, ComponentCategory::Battery(BatteryType::LiIon))
+        ]));
 
         Ok(())
     }

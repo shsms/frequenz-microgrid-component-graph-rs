@@ -27,6 +27,24 @@ impl Display for InverterType {
     }
 }
 
+/// Represents the type of a battery.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BatteryType {
+    Unspecified,
+    LiIon,
+    NaIon,
+}
+
+impl Display for BatteryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BatteryType::Unspecified => write!(f, "Unspecified"),
+            BatteryType::LiIon => write!(f, "LiIon"),
+            BatteryType::NaIon => write!(f, "NaIon"),
+        }
+    }
+}
+
 /// Represents the category of a component.
 ///
 /// Values of the underlying generated `ComponentCategory` and `ComponentType` types
@@ -37,7 +55,7 @@ pub enum ComponentCategory {
     Unspecified,
     Grid,
     Meter,
-    Battery,
+    Battery(BatteryType),
     Inverter(InverterType),
     EvCharger,
     Converter,
@@ -57,7 +75,7 @@ impl Display for ComponentCategory {
             ComponentCategory::Unspecified => write!(f, "Unspecified"),
             ComponentCategory::Grid => write!(f, "Grid"),
             ComponentCategory::Meter => write!(f, "Meter"),
-            ComponentCategory::Battery => write!(f, "Battery"),
+            ComponentCategory::Battery(battery_type) => write!(f, "Battery({})", battery_type),
             ComponentCategory::Inverter(inverter_type) => write!(f, "{}Inverter", inverter_type),
             ComponentCategory::EvCharger => write!(f, "EVCharger"),
             ComponentCategory::Converter => write!(f, "Converter"),
@@ -88,7 +106,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_battery(&self) -> bool {
-        self.category() == ComponentCategory::Battery
+        matches!(self.category(), ComponentCategory::Battery(_))
     }
 
     fn is_inverter(&self) -> bool {
