@@ -1,0 +1,28 @@
+name: Component Graph CI
+
+on:
+  push:
+    branches: [ v0.x.x ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Print environment (debug)
+        run: env
+
+      - name: Fetch sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run linter
+        run: cargo clippy -- -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
+
+      - name: Run tests
+        run: cargo test
