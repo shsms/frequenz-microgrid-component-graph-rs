@@ -18,29 +18,31 @@ where
     root: &'a N,
 }
 
-pub(crate) fn validate<N, E>(cg: &ComponentGraph<N, E>) -> Result<(), Error>
+impl<N, E> ComponentGraph<N, E>
 where
     N: Node,
     E: Edge,
 {
-    let Ok(root) = cg.component(cg.root_id) else {
-        return Err(Error::internal(format!(
-            "Grid component not found with detected component ID: {}.",
-            cg.root_id
-        )));
-    };
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        let Ok(root) = self.component(self.root_id) else {
+            return Err(Error::internal(format!(
+                "Grid component not found with detected component ID: {}.",
+                self.root_id
+            )));
+        };
 
-    let validator = ComponentGraphValidator { cg, root };
+        let validator = ComponentGraphValidator { cg: self, root };
 
-    validator.validate_acyclicity(root, vec![])?;
-    validator.validate_connected_graph(root)?;
+        validator.validate_acyclicity(root, vec![])?;
+        validator.validate_connected_graph(root)?;
 
-    validator.validate_root()?;
-    validator.validate_meters()?;
-    validator.validate_inverters()?;
-    validator.validate_batteries()?;
-    validator.validate_ev_chargers()?;
-    validator.validate_chps()?;
+        validator.validate_root()?;
+        validator.validate_meters()?;
+        validator.validate_inverters()?;
+        validator.validate_batteries()?;
+        validator.validate_ev_chargers()?;
+        validator.validate_chps()?;
 
-    Ok(())
+        Ok(())
+    }
 }

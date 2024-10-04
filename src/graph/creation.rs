@@ -8,7 +8,7 @@ use petgraph::graph::DiGraph;
 
 use crate::{component_category::CategoryPredicates, Edge, Error, Node};
 
-use super::{validation::validate, ComponentGraph, EdgeMap, NodeIndexMap};
+use super::{ComponentGraph, EdgeMap, NodeIndexMap};
 
 /// `ComponentGraph` instantiation.
 impl<N, E> ComponentGraph<N, E>
@@ -34,7 +34,7 @@ where
         };
         cg.add_connections(connections)?;
 
-        validate(&cg)?;
+        cg.validate()?;
 
         Ok(cg)
     }
