@@ -2,7 +2,7 @@
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
 mod component_category;
-pub use component_category::{BatteryType, ComponentCategory, InverterType};
+pub use component_category::{BatteryType, ComponentCategory, EvChargerType, InverterType};
 
 mod graph;
 pub use graph::{iterators, ComponentGraph};

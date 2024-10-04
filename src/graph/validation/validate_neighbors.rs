@@ -140,6 +140,7 @@ where
 mod tests {
     use super::*;
     use crate::component_category::BatteryType;
+    use crate::component_category::EvChargerType;
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::InverterType;
@@ -405,7 +406,7 @@ mod tests {
         let mut components = vec![
             TestComponent(1, ComponentCategory::Grid),
             TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::EvCharger),
+            TestComponent(3, ComponentCategory::EvCharger(EvChargerType::Dc)),
             TestComponent(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
@@ -416,7 +417,7 @@ mod tests {
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| {
                 e == Error::invalid_graph(
-                    "EVCharger:3 can't have any successors. Found Electrolyzer:4.",
+                    "EVCharger(DC):3 can't have any successors. Found Electrolyzer:4.",
                 )
             }),
         );

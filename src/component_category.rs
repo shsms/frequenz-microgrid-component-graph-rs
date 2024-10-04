@@ -45,6 +45,26 @@ impl Display for BatteryType {
     }
 }
 
+/// Represents the type of an EV charger.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EvChargerType {
+    Unspecified,
+    Ac,
+    Dc,
+    Hybrid,
+}
+
+impl Display for EvChargerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvChargerType::Unspecified => write!(f, "Unspecified"),
+            EvChargerType::Ac => write!(f, "AC"),
+            EvChargerType::Dc => write!(f, "DC"),
+            EvChargerType::Hybrid => write!(f, "Hybrid"),
+        }
+    }
+}
+
 /// Represents the category of a component.
 ///
 /// Values of the underlying generated `ComponentCategory` and `ComponentType` types
@@ -57,7 +77,7 @@ pub enum ComponentCategory {
     Meter,
     Battery(BatteryType),
     Inverter(InverterType),
-    EvCharger,
+    EvCharger(EvChargerType),
     Converter,
     CryptoMiner,
     Electrolyzer,
@@ -77,7 +97,9 @@ impl Display for ComponentCategory {
             ComponentCategory::Meter => write!(f, "Meter"),
             ComponentCategory::Battery(battery_type) => write!(f, "Battery({})", battery_type),
             ComponentCategory::Inverter(inverter_type) => write!(f, "{}Inverter", inverter_type),
-            ComponentCategory::EvCharger => write!(f, "EVCharger"),
+            ComponentCategory::EvCharger(ev_charger_type) => {
+                write!(f, "EVCharger({})", ev_charger_type)
+            }
             ComponentCategory::Converter => write!(f, "Converter"),
             ComponentCategory::CryptoMiner => write!(f, "CryptoMiner"),
             ComponentCategory::Electrolyzer => write!(f, "Electrolyzer"),
@@ -130,7 +152,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_ev_charger(&self) -> bool {
-        self.category() == ComponentCategory::EvCharger
+        matches!(self.category(), ComponentCategory::EvCharger(_))
     }
 
     fn is_chp(&self) -> bool {

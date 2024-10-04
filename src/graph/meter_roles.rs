@@ -132,6 +132,7 @@ where
 mod tests {
     use super::*;
     use crate::component_category::BatteryType;
+    use crate::component_category::EvChargerType;
     use crate::error::Error;
     use crate::ComponentCategory;
     use crate::InverterType;
@@ -266,7 +267,10 @@ mod tests {
         // Add an EV charger meter to the grid, then none of the meters
         // connected to the grid should be detected as grid meters.
         components.push(TestComponent(20, ComponentCategory::Meter));
-        components.push(TestComponent(21, ComponentCategory::EvCharger));
+        components.push(TestComponent(
+            21,
+            ComponentCategory::EvCharger(EvChargerType::Ac),
+        ));
         connections.push(TestConnection::new(1, 20));
         connections.push(TestConnection::new(20, 21));
 
