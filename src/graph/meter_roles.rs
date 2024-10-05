@@ -134,65 +134,30 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
     use crate::error::Error;
+    use crate::graph::test_types::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 
-    #[derive(Clone, Debug, PartialEq)]
-    struct TestComponent(u64, ComponentCategory);
-
-    impl Node for TestComponent {
-        fn component_id(&self) -> u64 {
-            self.0
-        }
-
-        fn category(&self) -> ComponentCategory {
-            self.1.clone()
-        }
-
-        fn is_supported(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct TestConnection(u64, u64);
-
-    impl TestConnection {
-        fn new(source: u64, destination: u64) -> Self {
-            TestConnection(source, destination)
-        }
-    }
-
-    impl Edge for TestConnection {
-        fn source(&self) -> u64 {
-            self.0
-        }
-
-        fn destination(&self) -> u64 {
-            self.1
-        }
-    }
-
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Meter),
-            TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(5, ComponentCategory::Battery(BatteryType::NaIon)),
-            TestComponent(6, ComponentCategory::Meter),
-            TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(9, ComponentCategory::Meter),
-            TestComponent(10, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent(11, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent(12, ComponentCategory::Meter),
-            TestComponent(13, ComponentCategory::Chp),
-            TestComponent(14, ComponentCategory::Meter),
-            TestComponent(15, ComponentCategory::Chp),
-            TestComponent(16, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent(17, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(18, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Meter),
+            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::NaIon)),
+            TestComponent::new(6, ComponentCategory::Meter),
+            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(9, ComponentCategory::Meter),
+            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(11, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(12, ComponentCategory::Meter),
+            TestComponent::new(13, ComponentCategory::Chp),
+            TestComponent::new(14, ComponentCategory::Meter),
+            TestComponent::new(15, ComponentCategory::Chp),
+            TestComponent::new(16, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(17, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(18, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![
             // Single Grid meter
@@ -227,21 +192,21 @@ mod tests {
         let (mut components, mut connections) = nodes_and_edges();
 
         // Add a meter to the grid without successors
-        components.push(TestComponent(19, ComponentCategory::Meter));
+        components.push(TestComponent::new(19, ComponentCategory::Meter));
         connections.push(TestConnection::new(1, 19));
 
         // Add a meter to the grid that has a battery meter and a PV meter as
         // successors.
-        components.push(TestComponent(20, ComponentCategory::Meter));
+        components.push(TestComponent::new(20, ComponentCategory::Meter));
         connections.push(TestConnection::new(1, 20));
 
         // battery chain
-        components.push(TestComponent(21, ComponentCategory::Meter));
-        components.push(TestComponent(
+        components.push(TestComponent::new(21, ComponentCategory::Meter));
+        components.push(TestComponent::new(
             22,
             ComponentCategory::Inverter(InverterType::Battery),
         ));
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             23,
             ComponentCategory::Battery(BatteryType::Unspecified),
         ));
@@ -250,8 +215,8 @@ mod tests {
         connections.push(TestConnection::new(22, 23));
 
         // pv chain
-        components.push(TestComponent(24, ComponentCategory::Meter));
-        components.push(TestComponent(
+        components.push(TestComponent::new(24, ComponentCategory::Meter));
+        components.push(TestComponent::new(
             25,
             ComponentCategory::Inverter(InverterType::Solar),
         ));
@@ -266,8 +231,8 @@ mod tests {
 
         // Add an EV charger meter to the grid, then none of the meters
         // connected to the grid should be detected as grid meters.
-        components.push(TestComponent(20, ComponentCategory::Meter));
-        components.push(TestComponent(
+        components.push(TestComponent::new(20, ComponentCategory::Meter));
+        components.push(TestComponent::new(
             21,
             ComponentCategory::EvCharger(EvChargerType::Ac),
         ));

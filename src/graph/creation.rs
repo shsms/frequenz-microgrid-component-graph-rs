@@ -118,54 +118,19 @@ where
 mod tests {
     use super::*;
     use crate::component_category::BatteryType;
+    use crate::graph::test_types::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 
-    #[derive(Clone)]
-    struct TestComponent(u64, ComponentCategory);
-
-    impl Node for TestComponent {
-        fn component_id(&self) -> u64 {
-            self.0
-        }
-
-        fn category(&self) -> ComponentCategory {
-            self.1.clone()
-        }
-
-        fn is_supported(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone)]
-    struct TestConnection(u64, u64);
-
-    impl TestConnection {
-        fn new(source: u64, destination: u64) -> Self {
-            TestConnection(source, destination)
-        }
-    }
-
-    impl Edge for TestConnection {
-        fn source(&self) -> u64 {
-            self.0
-        }
-
-        fn destination(&self) -> u64 {
-            self.1
-        }
-    }
-
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
-            TestComponent(6, ComponentCategory::Meter),
-            TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(3, ComponentCategory::Meter),
-            TestComponent(5, ComponentCategory::Battery(BatteryType::LiIon)),
-            TestComponent(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(2, ComponentCategory::Meter),
+            TestComponent::new(6, ComponentCategory::Meter),
+            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(3, ComponentCategory::Meter),
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(2, ComponentCategory::Meter),
         ];
         let connections = vec![
             TestConnection::new(3, 4),
@@ -188,25 +153,25 @@ mod tests {
                 .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),
         );
 
-        components.push(TestComponent(1, ComponentCategory::Grid));
-        connections.push(TestConnection(1, 2));
+        components.push(TestComponent::new(1, ComponentCategory::Grid));
+        connections.push(TestConnection::new(1, 2));
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
 
-        components.push(TestComponent(2, ComponentCategory::Meter));
+        components.push(TestComponent::new(2, ComponentCategory::Meter));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2"))
         );
 
         components.pop();
-        components.push(TestComponent(9, ComponentCategory::Unspecified));
+        components.push(TestComponent::new(9, ComponentCategory::Unspecified));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| e
                 == Error::invalid_component("ComponentCategory not specified for component: 9"))
         );
 
         components.pop();
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             9,
             ComponentCategory::Inverter(InverterType::Unspecified),
         ));
@@ -217,7 +182,7 @@ mod tests {
         );
 
         components.pop();
-        components.push(TestComponent(9, ComponentCategory::Grid));
+        components.push(TestComponent::new(9, ComponentCategory::Grid));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found."))
@@ -231,8 +196,8 @@ mod tests {
     fn test_connection_validation() {
         let (mut components, mut connections) = nodes_and_edges();
 
-        components.push(TestComponent(1, ComponentCategory::Grid));
-        connections.push(TestConnection(1, 2));
+        components.push(TestComponent::new(1, ComponentCategory::Grid));
+        connections.push(TestConnection::new(1, 2));
 
         connections.push(TestConnection::new(2, 2));
         assert!(

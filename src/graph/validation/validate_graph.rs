@@ -83,58 +83,23 @@ where
 mod tests {
     use super::*;
     use crate::component_category::BatteryType;
+    use crate::graph::test_types::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::InverterType;
 
-    #[derive(Clone)]
-    struct TestComponent(u64, ComponentCategory);
-
-    impl Node for TestComponent {
-        fn component_id(&self) -> u64 {
-            self.0
-        }
-
-        fn category(&self) -> ComponentCategory {
-            self.1.clone()
-        }
-
-        fn is_supported(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone)]
-    struct TestConnection(u64, u64);
-
-    impl TestConnection {
-        fn new(source: u64, destination: u64) -> Self {
-            TestConnection(source, destination)
-        }
-    }
-
-    impl Edge for TestConnection {
-        fn source(&self) -> u64 {
-            self.0
-        }
-
-        fn destination(&self) -> u64 {
-            self.1
-        }
-    }
-
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
-            TestComponent(6, ComponentCategory::Meter),
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(10, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent(3, ComponentCategory::Meter),
-            TestComponent(5, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(9, ComponentCategory::Meter),
+            TestComponent::new(6, ComponentCategory::Meter),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(3, ComponentCategory::Meter),
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(9, ComponentCategory::Meter),
         ];
         let connections = vec![
             TestConnection::new(3, 4),
@@ -156,7 +121,7 @@ mod tests {
         let (mut components, mut connections) = nodes_and_edges();
 
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
-        components.push(TestComponent(11, ComponentCategory::Meter));
+        components.push(TestComponent::new(11, ComponentCategory::Meter));
         let Err(err) = ComponentGraph::try_new(components.clone(), connections.clone()) else {
             panic!()
         };
@@ -168,7 +133,7 @@ mod tests {
             err
         );
 
-        components.push(TestComponent(12, ComponentCategory::Meter));
+        components.push(TestComponent::new(12, ComponentCategory::Meter));
 
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(

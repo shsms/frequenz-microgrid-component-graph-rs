@@ -141,56 +141,21 @@ mod tests {
     use super::*;
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
+    use crate::graph::test_types::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::InverterType;
 
-    #[derive(Clone)]
-    struct TestComponent(u64, ComponentCategory);
-
-    impl Node for TestComponent {
-        fn component_id(&self) -> u64 {
-            self.0
-        }
-
-        fn category(&self) -> ComponentCategory {
-            self.1.clone()
-        }
-
-        fn is_supported(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone)]
-    struct TestConnection(u64, u64);
-
-    impl TestConnection {
-        fn new(source: u64, destination: u64) -> Self {
-            TestConnection(source, destination)
-        }
-    }
-
-    impl Edge for TestConnection {
-        fn source(&self) -> u64 {
-            self.0
-        }
-
-        fn destination(&self) -> u64 {
-            self.1
-        }
-    }
-
     #[test]
     fn test_validate_root() {
         let components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
         ];
         let connections = vec![TestConnection::new(1, 2)];
         assert!(ComponentGraph::try_new(components, connections).is_ok());
 
-        let components = vec![TestComponent(1, ComponentCategory::Grid)];
+        let components = vec![TestComponent::new(1, ComponentCategory::Grid)];
         let connections: Vec<TestConnection> = vec![];
         assert!(
             ComponentGraph::try_new(components, connections).is_err_and(|e| {
@@ -199,9 +164,9 @@ mod tests {
         );
 
         let components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Meter),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Meter),
         ];
         let connections: Vec<TestConnection> = vec![
             TestConnection::new(1, 2),
@@ -221,9 +186,9 @@ mod tests {
     #[test]
     fn test_validate_meter() {
         let components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
         assert!(
@@ -239,10 +204,10 @@ mod tests {
     #[test]
     fn test_validate_battery_inverter() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -271,7 +236,7 @@ mod tests {
             }),
         );
 
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             4,
             ComponentCategory::Battery(BatteryType::LiIon),
         ));
@@ -283,10 +248,10 @@ mod tests {
     #[test]
     fn test_validate_pv_inverter() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -310,10 +275,10 @@ mod tests {
     #[test]
     fn test_validate_hybrid_inverter() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Inverter(InverterType::Hybrid)),
-            TestComponent(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Hybrid)),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -334,7 +299,7 @@ mod tests {
 
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
 
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             4,
             ComponentCategory::Battery(BatteryType::LiIon),
         ));
@@ -346,11 +311,11 @@ mod tests {
     #[test]
     fn test_validate_batteries() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(4, ComponentCategory::Battery(BatteryType::NaIon)),
-            TestComponent(5, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(4, ComponentCategory::Battery(BatteryType::NaIon)),
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -374,11 +339,11 @@ mod tests {
         components.pop();
         components.pop();
 
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             3,
             ComponentCategory::Inverter(InverterType::Hybrid),
         ));
-        components.push(TestComponent(
+        components.push(TestComponent::new(
             4,
             ComponentCategory::Battery(BatteryType::LiIon),
         ));
@@ -386,8 +351,8 @@ mod tests {
         assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
 
         let components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2)];
 
@@ -404,10 +369,10 @@ mod tests {
     #[test]
     fn test_validate_ev_chargers() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::EvCharger(EvChargerType::Dc)),
-            TestComponent(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::EvCharger(EvChargerType::Dc)),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -431,10 +396,10 @@ mod tests {
     #[test]
     fn test_validate_chps() {
         let mut components = vec![
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(2, ComponentCategory::Meter),
-            TestComponent(3, ComponentCategory::Chp),
-            TestComponent(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Chp),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),

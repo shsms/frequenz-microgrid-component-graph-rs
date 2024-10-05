@@ -80,55 +80,20 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::CategoryPredicates;
     use crate::error::Error;
+    use crate::graph::test_types::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 
-    #[derive(Clone, Debug, PartialEq)]
-    struct TestComponent(u64, ComponentCategory);
-
-    impl Node for TestComponent {
-        fn component_id(&self) -> u64 {
-            self.0
-        }
-
-        fn category(&self) -> ComponentCategory {
-            self.1.clone()
-        }
-
-        fn is_supported(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct TestConnection(u64, u64);
-
-    impl TestConnection {
-        fn new(source: u64, destination: u64) -> Self {
-            TestConnection(source, destination)
-        }
-    }
-
-    impl Edge for TestConnection {
-        fn source(&self) -> u64 {
-            self.0
-        }
-
-        fn destination(&self) -> u64 {
-            self.1
-        }
-    }
-
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
-            TestComponent(6, ComponentCategory::Meter),
-            TestComponent(1, ComponentCategory::Grid),
-            TestComponent(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(3, ComponentCategory::Meter),
-            TestComponent(5, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(8, ComponentCategory::Battery(BatteryType::LiIon)),
-            TestComponent(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent(2, ComponentCategory::Meter),
+            TestComponent::new(6, ComponentCategory::Meter),
+            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(3, ComponentCategory::Meter),
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(8, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
+            TestComponent::new(2, ComponentCategory::Meter),
         ];
         let connections = vec![
             TestConnection::new(3, 4),
@@ -150,11 +115,11 @@ mod tests {
 
         assert_eq!(
             graph.component(1),
-            Ok(&TestComponent(1, ComponentCategory::Grid))
+            Ok(&TestComponent::new(1, ComponentCategory::Grid))
         );
         assert_eq!(
             graph.component(5),
-            Ok(&TestComponent(
+            Ok(&TestComponent::new(
                 5,
                 ComponentCategory::Battery(BatteryType::Unspecified)
             ))
@@ -174,8 +139,8 @@ mod tests {
 
         assert!(graph.components().eq(&components));
         assert!(graph.components().filter(|x| x.is_battery()).eq(&[
-            TestComponent(5, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent(8, ComponentCategory::Battery(BatteryType::LiIon))
+            TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
+            TestComponent::new(8, ComponentCategory::Battery(BatteryType::LiIon))
         ]));
 
         Ok(())
@@ -205,16 +170,16 @@ mod tests {
 
         assert!(graph
             .predecessors(3)
-            .is_ok_and(|x| x.eq(&[TestComponent(2, ComponentCategory::Meter)])));
+            .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)])));
 
         assert!(graph
             .successors(1)
-            .is_ok_and(|x| x.eq(&[TestComponent(2, ComponentCategory::Meter)])));
+            .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)])));
 
         assert!(graph.successors(2).is_ok_and(|x| {
             x.eq(&[
-                TestComponent(6, ComponentCategory::Meter),
-                TestComponent(3, ComponentCategory::Meter),
+                TestComponent::new(6, ComponentCategory::Meter),
+                TestComponent::new(3, ComponentCategory::Meter),
             ])
         }));
 
