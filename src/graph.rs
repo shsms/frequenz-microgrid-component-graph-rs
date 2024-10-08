@@ -9,7 +9,9 @@ mod meter_roles;
 mod retrieval;
 mod validation;
 
+mod formulas;
 pub mod iterators;
+mod traversal;
 
 use crate::{Edge, Node};
 use petgraph::graph::{DiGraph, NodeIndex};
