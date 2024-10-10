@@ -2,6 +2,7 @@
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
 #![allow(dead_code)]
+#[derive(Debug, Clone)]
 pub(crate) enum FormulaExpression {
     Number { value: f64 },
     Component { component_id: u64 },
