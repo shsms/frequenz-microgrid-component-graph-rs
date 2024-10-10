@@ -19,10 +19,11 @@ where
             }
             return Ok(components);
         }
-        Ok(vec![FExp::max(vec![
-            FExp::number(0.0),
-            FExp::component(component_id),
-        ])])
+        Ok(vec![self.with_fallback(
+            vec![component_id],
+            true,
+            |exp| FExp::max(vec![FExp::number(0.0), exp]),
+        )?])
     }
 
     /// Generates the consumption formula for the given node.

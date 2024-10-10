@@ -3,7 +3,7 @@
 
 //! Methods for retrieving components and connections from a [`ComponentGraph`].
 
-use crate::iterators::{Components, Connections, Neighbors};
+use crate::iterators::{Components, Connections, Neighbors, Siblings};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 /// `Component` and `Connection` retrieval.
@@ -71,6 +71,23 @@ where
             .ok_or_else(|| {
                 Error::component_not_found(format!("Component with id {} not found.", component_id))
             })
+    }
+
+    /// Returns an iterator over the *siblings* of the component with the
+    /// given `component_id`.
+    ///
+    /// Siblings are the successors of the predecessors of the given component.
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub fn siblings(&self, component_id: u64) -> Result<Siblings<N>, Error> {
+        Ok(Siblings {
+            iter: self
+                .predecessors(component_id)?
+                .map(|x| self.successors(x.component_id()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten(),
+        })
     }
 }
 

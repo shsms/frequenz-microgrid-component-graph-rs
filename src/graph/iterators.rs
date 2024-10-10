@@ -3,6 +3,8 @@
 
 //! Iterators over components and connections in a `ComponentGraph`.
 
+use std::{iter::Flatten, vec::IntoIter};
+
 use petgraph::graph::DiGraph;
 
 use crate::{ComponentGraph, Edge, Node};
@@ -67,5 +69,23 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|i| &self.graph[i])
+    }
+}
+
+pub struct Siblings<'a, N>
+where
+    N: Node,
+{
+    pub(crate) iter: Flatten<IntoIter<Neighbors<'a, N>>>,
+}
+
+impl<'a, N> Iterator for Siblings<'a, N>
+where
+    N: Node,
+{
+    type Item = &'a N;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 }

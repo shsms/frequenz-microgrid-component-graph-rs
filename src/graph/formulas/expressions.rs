@@ -42,6 +42,13 @@ impl FormulaExpression {
         Self::Component { component_id }
     }
 
+    pub(crate) fn components(component_ids: impl IntoIterator<Item = u64>) -> Vec<Self> {
+        component_ids
+            .into_iter()
+            .map(|id| Self::component(id))
+            .collect()
+    }
+
     pub(crate) fn add(params: Vec<FormulaExpression>) -> Self {
         Self::Add { params }
     }

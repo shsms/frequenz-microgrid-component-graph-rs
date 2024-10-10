@@ -4,3 +4,4 @@
 mod consumption;
 mod expressions;
 mod grid;
+mod traversal;
