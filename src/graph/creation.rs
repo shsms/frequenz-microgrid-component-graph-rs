@@ -118,7 +118,7 @@ where
 mod tests {
     use super::*;
     use crate::component_category::BatteryType;
-    use crate::graph::test_types::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 

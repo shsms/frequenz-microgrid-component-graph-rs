@@ -126,6 +126,13 @@ where
             })
             && has_successors)
     }
+
+    pub fn is_component_meter(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_pv_meter(component_id)?
+            || self.is_battery_meter(component_id)?
+            || self.is_ev_charger_meter(component_id)?
+            || self.is_chp_meter(component_id)?)
+    }
 }
 
 #[cfg(test)]
@@ -134,7 +141,7 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
     use crate::error::Error;
-    use crate::graph::test_types::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 

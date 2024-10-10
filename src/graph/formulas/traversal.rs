@@ -5,25 +5,22 @@ use crate::{component_category::CategoryPredicates, ComponentGraph, Edge, Error,
 
 use super::expressions::FormulaExpression;
 
-pub(crate) struct FindFallback<'a, N, E, M, C>
+pub(crate) struct FindFallback<'a, N, E, M>
 where
     N: Node,
     E: Edge,
     M: Fn(FormulaExpression) -> FormulaExpression,
-    C: Fn(&N) -> bool,
 {
     pub(crate) prefer_meters: bool,
-    pub(crate) wrap_method: M,
-    pub(crate) category_predicate: C,
+    pub(crate) wrap_method: Option<M>,
     pub(crate) graph: &'a ComponentGraph<N, E>,
 }
 
-impl<'a, N, E, M, C> FindFallback<'a, N, E, M, C>
+impl<'a, N, E, M> FindFallback<'a, N, E, M>
 where
     N: Node,
     E: Edge,
     M: Fn(FormulaExpression) -> FormulaExpression,
-    C: Fn(&N) -> bool,
 {
     pub(super) fn with_fallback(
         &self,
@@ -36,6 +33,14 @@ where
                 exprs[0].clone()
             }
         })
+    }
+
+    fn wrap(&self, expr: FormulaExpression) -> FormulaExpression {
+        if let Some(wrap_method) = &self.wrap_method {
+            (wrap_method)(expr)
+        } else {
+            expr
+        }
     }
 
     fn impl_with_fallback(
@@ -51,9 +56,7 @@ where
             {
                 exprs.extend(formulas);
             } else {
-                exprs.push((self.wrap_method)(FormulaExpression::component(
-                    component_id,
-                )));
+                exprs.push(self.wrap(FormulaExpression::component(component_id)));
             }
         }
 
@@ -83,19 +86,17 @@ where
                                 .map(|x| x.component_id()),
                         )
                         .into_iter()
-                        .map(&self.wrap_method)
+                        .map(|x| self.wrap(x))
                         .collect(),
                     ),
-                    (self.wrap_method)(FormulaExpression::component(component_id)),
+                    self.wrap(FormulaExpression::component(component_id)),
                 ];
                 if self.prefer_meters {
                     exprs = exprs.into_iter().rev().collect();
                 }
-                return Ok(Some((self.wrap_method)(FormulaExpression::coalesce(exprs))));
+                return Ok(Some(self.wrap(FormulaExpression::coalesce(exprs))));
             } else {
-                return Ok(Some((self.wrap_method)(FormulaExpression::component(
-                    component_id,
-                ))));
+                return Ok(Some(self.wrap(FormulaExpression::component(component_id))));
             }
         }
         Ok(None)
@@ -108,9 +109,6 @@ where
     ) -> Result<Option<Vec<FormulaExpression>>, Error> {
         let mut exprs = vec![];
         let component = self.graph.component(component_id)?;
-        if !(self.category_predicate)(component) {
-            return Ok(None);
-        }
         if component.is_battery_inverter()
             || component.is_chp()
             || component.is_pv_inverter()
@@ -125,9 +123,7 @@ where
                 .iter()
                 .all(|sibling| component_ids.contains(&sibling.component_id()))
             {
-                exprs.push((self.wrap_method)(FormulaExpression::component(
-                    component_id,
-                )));
+                exprs.push(self.wrap(FormulaExpression::component(component_id)));
                 return Ok(Some(exprs));
             }
             let predecessors = self.graph.predecessors(component_id)?.collect::<Vec<_>>();
@@ -154,5 +150,36 @@ where
             }
         }
         Ok(None)
+    }
+}
+
+impl<N, E> ComponentGraph<N, E>
+where
+    N: Node,
+    E: Edge,
+{
+    pub(crate) fn find_all(
+        &self,
+        from: u64,
+        mut pred: impl FnMut(&N) -> bool,
+        direction: petgraph::Direction,
+    ) -> Result<Vec<&N>, Error> {
+        let index = self.node_indices.get(&from).ok_or_else(|| {
+            Error::component_not_found(format!("Component with id {} not found.", from))
+        })?;
+        let mut stack = vec![*index];
+        let mut found = vec![];
+
+        while let Some(index) = stack.pop() {
+            let node = &self.graph[index];
+            if pred(node) {
+                found.push(node);
+            }
+
+            let neighbors = self.graph.neighbors_directed(index, direction);
+            stack.extend(neighbors);
+        }
+
+        Ok(found)
     }
 }

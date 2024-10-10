@@ -13,9 +13,9 @@ where
 {
     /// Generates the grid formula for the given node.
     ///
-    /// The grid formula is the sum of all components connected to the
-    /// grid. This formula can be used for calculating power or current metrics
-    /// at the grid connection point.
+    /// The grid formula is the sum of all components connected to the grid.
+    /// This formula can be used for calculating power or current metrics at the
+    /// grid connection point.
     pub fn grid_formula(&self) -> Result<String, Error> {
         let mut components = vec![];
         for comp in self.successors(self.root_id)? {
@@ -31,7 +31,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        graph::test_types::{TestComponent, TestConnection},
+        graph::test_utils::{TestComponent, TestConnection},
         ComponentCategory,
     };
 
