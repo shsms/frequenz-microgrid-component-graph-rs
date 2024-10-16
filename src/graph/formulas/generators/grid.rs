@@ -3,7 +3,7 @@
 
 //! This module contains the methods for generating grid formulas.
 
-use super::expressions::FormulaExpression;
+use super::super::expr::Expr;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 impl<N, E> ComponentGraph<N, E>
@@ -19,11 +19,11 @@ where
     pub fn grid_formula(&self) -> Result<String, Error> {
         let mut components = vec![];
         for comp in self.successors(self.root_id)? {
-            components.push(FormulaExpression::Component {
+            components.push(Expr::Component {
                 component_id: comp.component_id(),
             });
         }
-        Ok(FormulaExpression::Add { params: components }.to_string())
+        Ok(Expr::Add { params: components }.to_string())
     }
 }
 
