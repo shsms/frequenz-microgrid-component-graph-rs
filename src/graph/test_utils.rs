@@ -60,6 +60,12 @@ impl Edge for TestConnection {
 #[derive(Eq, Hash, PartialEq, Copy, Clone)]
 pub(super) struct ComponentHandle(u64);
 
+impl ComponentHandle {
+    pub(super) fn component_id(&self) -> u64 {
+        self.0
+    }
+}
+
 pub(super) struct ComponentGraphBuilder {
     components: Vec<TestComponent>,
     connections: Vec<TestConnection>,
@@ -112,6 +118,10 @@ impl ComponentGraphBuilder {
 
     pub(super) fn ev_charger(&mut self) -> ComponentHandle {
         self.add_component(ComponentCategory::EvCharger(EvChargerType::Ac))
+    }
+
+    pub(super) fn chp(&mut self) -> ComponentHandle {
+        self.add_component(ComponentCategory::Chp)
     }
 
     /// Connects two components in the graph

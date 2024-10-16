@@ -12,6 +12,7 @@ where
     M: Fn(FormulaExpression) -> FormulaExpression,
 {
     pub(crate) prefer_meters: bool,
+    pub(crate) only_single_component_category_meters: bool,
     pub(crate) wrap_method: Option<M>,
     pub(crate) graph: &'a ComponentGraph<N, E>,
 }
@@ -72,7 +73,10 @@ where
         &self,
         component_id: u64,
     ) -> Result<Option<FormulaExpression>, Error> {
-        if self.is_component_meter(component_id)? {
+        if (self.only_single_component_category_meters && self.is_component_meter(component_id)?)
+            || (!self.only_single_component_category_meters
+                && !self.graph.successors(component_id)?.any(|x| x.is_meter()))
+        {
             if self
                 .graph
                 .successors(component_id)?

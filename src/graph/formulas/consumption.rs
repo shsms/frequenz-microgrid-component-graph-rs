@@ -19,7 +19,7 @@ where
         let component = self.graph.component(component_id)?;
         if component.is_meter() && !self.graph.is_component_meter(component_id)? {
             let mut expr = FormulaExpression::from(component);
-            if let Some(successors) = self.non_component_meter_successors(component_id)? {
+            if let Some(successors) = self.successor_meters(component_id)? {
                 expr = expr + successors;
             } else if let Some(wrap_method) = wrap_method {
                 expr = wrap_method(expr);
@@ -30,27 +30,28 @@ where
         }
     }
 
-    fn non_component_meter_successors(
-        &self,
-        component_id: u64,
-    ) -> Result<Option<FormulaExpression>, Error> {
+    fn successor_meters(&self, component_id: u64) -> Result<Option<FormulaExpression>, Error> {
         let mut expr = None;
         for successor in self.graph.successors(component_id)? {
-            if successor.is_meter() && !self.graph.is_component_meter(successor.component_id())? {
-                if let Some(successors) =
-                    self.non_component_meter_successors(successor.component_id())?
-                {
-                    expr = Some(match expr {
-                        Some(expr) => expr + successors,
-                        None => successors,
-                    });
-                }
-            } else {
-                expr = Some(match expr {
-                    Some(expr) => expr - self.meters_with_fallback(successor, None)?,
-                    None => -self.meters_with_fallback(successor, None)?,
-                });
-            }
+            expr = Some(match expr {
+                Some(expr) => expr - self.meters_with_fallback(successor, None)?,
+                None => -self.meters_with_fallback(successor, None)?,
+            });
+            // if successor.is_meter() && !self.graph.is_component_meter(successor.component_id())? {
+            //     if let Some(successors) =
+            //         self.non_component_meter_successors(successor.component_id())?
+            //     {
+            //         expr = Some(match expr {
+            //             Some(expr) => expr + successors,
+            //             None => successors,
+            //         });
+            //     }
+            // } else {
+            //     expr = Some(match expr {
+            //         Some(expr) => expr - self.meters_with_fallback(successor, None)?,
+            //         None => -self.meters_with_fallback(successor, None)?,
+            //     });
+            // }
         }
 
         Ok(expr)
@@ -77,7 +78,14 @@ where
             {
                 continue;
             }
+            // let meter_expr = if let Some(wrap_method) = wrap_method {
+            //     wrap_method(component_meter.into())
+            // } else {
+            //     component_meter.into()
+            // };
             expr = Some(match expr {
+                // Some(expr) => expr + meter_expr,
+                // None => meter_expr,
                 Some(expr) => expr + self.meters_with_fallback(component_meter, wrap_method)?,
                 None => self.meters_with_fallback(component_meter, wrap_method)?,
             });
@@ -90,9 +98,10 @@ where
         successor: &N,
         wrap_method: Option<fn(FormulaExpression) -> FormulaExpression>,
     ) -> Result<FormulaExpression, Error> {
-        if self.graph.is_component_meter(successor.component_id())? {
+        if successor.is_meter() {
             Ok(FindFallback {
                 prefer_meters: true,
+                only_single_component_category_meters: false,
                 wrap_method,
                 graph: self.graph,
             }
@@ -205,17 +214,18 @@ mod tests {
             formula,
             concat!(
                 "#2 - (",
-                "#17 + #16 + #15 + COALESCE(#12, #13) + ",
+                "COALESCE(#14, #17 + #16 + #15) + COALESCE(#12, #13) + ",
                 "COALESCE(#9, #11 + #10) + COALESCE(#6, #7) + COALESCE(#3, #4)",
                 ") + ",
                 "COALESCE(MAX(0, #9), MAX(0, #11) + MAX(0, #10)) + ",
-                "COALESCE(MAX(0, #12), MAX(0, #13))"
+                "COALESCE(MAX(0, #12), MAX(0, #13))",
+                // "MAX(0, #9) + MAX(0, #12)",
             )
         );
     }
 
     #[test]
-    fn test_consumption_formula_single_meter() -> Result<(), Error> {
+    fn test_consumption_formula_with_grid_meter() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
 
@@ -227,13 +237,17 @@ mod tests {
         let formula = FormulaBuilder::new(&graph).consumption_formula()?;
         assert_eq!(formula, "MAX(0, #1)");
 
+        // Add a battery meter with one battery inverter and one battery to the
+        // grid meter.
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
         builder.connect(grid_meter, meter_bat_chain);
 
         let graph = builder.build()?;
         let formula = FormulaBuilder::new(&graph).consumption_formula()?;
+        // Formula subtracts the battery power from the grid meter.
         assert_eq!(formula, "#1 - COALESCE(#2, #3)");
 
+        // Add a solar meter with two solar inverters to the grid meter.
         let meter_pv_chain = builder.meter_pv_chain(2);
         builder.connect(grid_meter, meter_pv_chain);
 
@@ -242,10 +256,54 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
+                // subtracts solar and battery powers from the grid meter.
                 "#1 - (COALESCE(#5, #7 + #6) + COALESCE(#2, #3)) + ",
+                // any measured consumption from the solar inverters, or the sum of
+                // the solar inverters, if meter data is not available.
                 "COALESCE(MAX(0, #5), MAX(0, #7) + MAX(0, #6))"
             )
         );
+
+        // Add a "mixed" meter with a CHP, an ev charger and a solar inverter to
+        // the grid meter.
+        let solar_inverter = builder.solar_inverter();
+        let chp = builder.chp();
+        let ev_charger = builder.ev_charger();
+        let meter = builder.meter();
+        builder.connect(meter, solar_inverter);
+        builder.connect(meter, chp);
+        builder.connect(meter, ev_charger);
+        builder.connect(grid_meter, meter);
+
+        let graph = builder.build()?;
+        let formula = FormulaBuilder::new(&graph).consumption_formula()?;
+        assert_eq!(
+            formula,
+            concat!(
+                // subtracts the solar, battery, CHP and EV charger powers from
+                // the grid meter.  This allows unspecified consumption of the
+                // "mixed" meter to be accounted for as well.
+                "#1 - ",
+                "(COALESCE(#11, #10 + #9 + #8) + COALESCE(#5, #7 + #6) + COALESCE(#2, #3)) + ",
+                // No changes here.
+                "COALESCE(MAX(0, #5), MAX(0, #7) + MAX(0, #6))"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_consumption_formula_without_grid_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let meter_bat_chain = builder.meter_bat_chain(1, 2);
+        builder.connect(grid, meter_bat_chain);
+
+        let graph = builder.build()?;
+        let formula = graph.consumer_formula()?;
+        assert_eq!(formula, "");
 
         Ok(())
     }
