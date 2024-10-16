@@ -173,6 +173,15 @@ impl ComponentGraphBuilder {
         meter
     }
 
+    pub(super) fn meter_chp_chain(&mut self, num_chp: usize) -> ComponentHandle {
+        let meter = self.meter();
+        for _ in 0..num_chp {
+            let chp = self.chp();
+            self.connect(meter, chp);
+        }
+        meter
+    }
+
     /// Finalizes the graph and returns the components and connections
     pub(super) fn build(&self) -> Result<ComponentGraph<TestComponent, TestConnection>, Error> {
         ComponentGraph::try_new(self.components.clone(), self.connections.clone())

@@ -1,30 +1,12 @@
 // License: MIT
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
-mod consumption;
-mod expressions;
-mod grid;
+mod expr;
+mod fallback;
+mod generators;
 mod traversal;
 
 use crate::{ComponentGraph, Edge, Error, Node};
-
-pub(crate) struct FormulaBuilder<'a, N, E>
-where
-    N: Node,
-    E: Edge,
-{
-    graph: &'a ComponentGraph<N, E>,
-}
-
-impl<'a, N, E> FormulaBuilder<'a, N, E>
-where
-    N: Node,
-    E: Edge,
-{
-    pub fn new(graph: &'a ComponentGraph<N, E>) -> Self {
-        Self { graph }
-    }
-}
 
 impl<N, E> ComponentGraph<N, E>
 where
@@ -32,6 +14,14 @@ where
     E: Edge,
 {
     pub fn consumer_formula(&self) -> Result<String, Error> {
-        FormulaBuilder::new(self).consumption_formula()
+        generators::consumer::ConsumerFormulaBuilder::try_new(self)?.build()
+    }
+
+    pub fn grid_formula(&self) -> Result<String, Error> {
+        generators::grid::GridFormulaBuilder::try_new(self)?.build()
+    }
+
+    pub fn producer_formula(&self) -> Result<String, Error> {
+        generators::producer::ProducerFormulaBuilder::try_new(self)?.build()
     }
 }

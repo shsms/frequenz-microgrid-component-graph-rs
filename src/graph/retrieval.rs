@@ -3,6 +3,8 @@
 
 //! Methods for retrieving components and connections from a [`ComponentGraph`].
 
+use std::collections::BTreeSet;
+
 use crate::iterators::{Components, Connections, Neighbors, Siblings};
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -74,20 +76,71 @@ where
     }
 
     /// Returns an iterator over the *siblings* of the component with the
-    /// given `component_id`.
-    ///
-    /// Siblings are the successors of the predecessors of the given component.
+    /// given `component_id`, that have a shared predecessors.
     ///
     /// Returns an error if the given `component_id` does not exist.
-    pub fn siblings(&self, component_id: u64) -> Result<Siblings<N>, Error> {
-        Ok(Siblings {
-            iter: self
-                .predecessors(component_id)?
+    pub(crate) fn siblings_from_predecessors(
+        &self,
+        component_id: u64,
+    ) -> Result<Siblings<N>, Error> {
+        Ok(Siblings::new(
+            component_id,
+            self.predecessors(component_id)?
                 .map(|x| self.successors(x.component_id()))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .flatten(),
-        })
+        ))
+    }
+
+    /// Returns an iterator over the *siblings* of the component with the
+    /// given `component_id`, that have a shared successors.
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub(crate) fn siblings_from_successors(&self, component_id: u64) -> Result<Siblings<N>, Error> {
+        Ok(Siblings::new(
+            component_id,
+            self.successors(component_id)?
+                .map(|x| self.predecessors(x.component_id()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten(),
+        ))
+    }
+
+    /// Returns a set of all components that match the given predicate, starting
+    /// from the component with the given `component_id`.
+    ///
+    /// If `follow_after_match` is `true`, the search continues deeper beyond
+    /// the matching components.
+    pub(crate) fn find_all(
+        &self,
+        from: u64,
+        mut pred: impl FnMut(&N) -> bool,
+        follow_after_match: bool,
+    ) -> Result<BTreeSet<u64>, Error> {
+        let index = self.node_indices.get(&from).ok_or_else(|| {
+            Error::component_not_found(format!("Component with id {} not found.", from))
+        })?;
+        let mut stack = vec![*index];
+        let mut found = BTreeSet::new();
+
+        while let Some(index) = stack.pop() {
+            let node = &self.graph[index];
+            if pred(node) {
+                found.insert(node.component_id());
+                if !follow_after_match {
+                    continue;
+                }
+            }
+
+            let neighbors = self
+                .graph
+                .neighbors_directed(index, petgraph::Direction::Outgoing);
+            stack.extend(neighbors);
+        }
+
+        Ok(found)
     }
 }
 

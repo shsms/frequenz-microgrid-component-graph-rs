@@ -3,7 +3,7 @@
 
 //! Iterators over components and connections in a `ComponentGraph`.
 
-use std::{iter::Flatten, vec::IntoIter};
+use std::{collections::HashSet, iter::Flatten, vec::IntoIter};
 
 use petgraph::graph::DiGraph;
 
@@ -76,7 +76,22 @@ pub struct Siblings<'a, N>
 where
     N: Node,
 {
+    pub(crate) component_id: u64,
     pub(crate) iter: Flatten<IntoIter<Neighbors<'a, N>>>,
+    visited: HashSet<u64>,
+}
+
+impl<'a, N> Siblings<'a, N>
+where
+    N: Node,
+{
+    pub(crate) fn new(component_id: u64, iter: Flatten<IntoIter<Neighbors<'a, N>>>) -> Self {
+        Siblings {
+            component_id,
+            iter,
+            visited: HashSet::new(),
+        }
+    }
 }
 
 impl<'a, N> Iterator for Siblings<'a, N>
@@ -86,6 +101,12 @@ where
     type Item = &'a N;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
+        while let Some(i) = self.iter.next() {
+            if i.component_id() == self.component_id || !self.visited.insert(i.component_id()) {
+                continue;
+            }
+            return Some(i);
+        }
+        return None;
     }
 }
