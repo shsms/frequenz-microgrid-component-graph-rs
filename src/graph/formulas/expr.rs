@@ -1,22 +1,21 @@
 // License: MIT
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
-#![allow(dead_code)]
-
 use crate::Node;
+
 #[derive(Debug, Clone)]
-pub(crate) enum FormulaExpression {
-    Neg { param: Box<FormulaExpression> },
+pub(crate) enum Expr {
+    Neg { param: Box<Expr> },
     Number { value: f64 },
     Component { component_id: u64 },
-    Add { params: Vec<FormulaExpression> },
-    Sub { params: Vec<FormulaExpression> },
-    Coalesce { params: Vec<FormulaExpression> },
-    Min { params: Vec<FormulaExpression> },
-    Max { params: Vec<FormulaExpression> },
+    Add { params: Vec<Expr> },
+    Sub { params: Vec<Expr> },
+    Coalesce { params: Vec<Expr> },
+    Min { params: Vec<Expr> },
+    Max { params: Vec<Expr> },
 }
 
-impl std::ops::Add for FormulaExpression {
+impl std::ops::Add for Expr {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
@@ -49,22 +48,29 @@ impl std::ops::Add for FormulaExpression {
     }
 }
 
-impl std::ops::Sub for FormulaExpression {
+impl std::ops::Sub for Expr {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self {
         match (self, rhs) {
+            // (a - b) - -c = a - b + c
             (sub @ Self::Sub { .. }, Self::Neg { param }) => sub + *param,
+            // -a - (b - c) = c - b - a
             (Self::Neg { param }, sub @ Self::Sub { .. }) => -sub - *param,
+            // (a - b) - c = a - b - c
             (Self::Sub { mut params }, rhs) => {
                 params.push(rhs);
                 Self::Sub { params }
             }
+            // -a - -b = b - a
             (Self::Neg { param: lhs }, Self::Neg { param: rhs }) => Self::Sub {
                 params: vec![*rhs, *lhs],
             },
-            (Self::Neg { param }, value) => Self::negative(*param + value),
+            // -a - b = -(a + b)
+            (Self::Neg { param }, value) => -(*param + value),
+            // a - -b = a + b
             (lhs, Self::Neg { param }) => lhs + *param,
+            // Catch all other cases
             (lhs, rhs) => Self::Sub {
                 params: vec![lhs, rhs],
             },
@@ -72,15 +78,28 @@ impl std::ops::Sub for FormulaExpression {
     }
 }
 
-impl std::ops::Neg for FormulaExpression {
+impl std::ops::Neg for Expr {
     type Output = Self;
 
     fn neg(self) -> Self {
-        Self::negative(self)
+        match self {
+            // -(-a) = a
+            Expr::Neg { param: inner } => *inner,
+            // -(a - b) = b - a
+            // -(a - b - c) = b + c - a
+            Expr::Sub { mut params } => {
+                let first = params.remove(0);
+                Expr::Add { params } - first
+            }
+            // Catch all other cases
+            _ => Expr::Neg {
+                param: Box::new(self),
+            },
+        }
     }
 }
 
-impl<N: Node> From<&N> for FormulaExpression {
+impl<N: Node> From<&N> for Expr {
     fn from(node: &N) -> Self {
         Self::Component {
             component_id: node.component_id(),
@@ -89,20 +108,7 @@ impl<N: Node> From<&N> for FormulaExpression {
 }
 
 /// Constructors for `FormulaExpression`.
-impl FormulaExpression {
-    pub(crate) fn negative(param: FormulaExpression) -> Self {
-        if let Self::Neg { param: inner } = param {
-            *inner
-        } else if let Self::Sub { mut params } = param {
-            let first = params.remove(0);
-            Self::Add { params } - first
-        } else {
-            Self::Neg {
-                param: Box::new(param),
-            }
-        }
-    }
-
+impl Expr {
     pub(crate) fn number(value: f64) -> Self {
         Self::Number { value }
     }
@@ -115,28 +121,20 @@ impl FormulaExpression {
         component_ids.into_iter().map(Self::component).collect()
     }
 
-    pub(crate) fn add(params: Vec<FormulaExpression>) -> Self {
-        Self::Add { params }
-    }
-
-    pub(crate) fn subtract(params: Vec<FormulaExpression>) -> Self {
-        Self::Sub { params }
-    }
-
-    pub(crate) fn coalesce(params: Vec<FormulaExpression>) -> Self {
+    pub(crate) fn coalesce(params: Vec<Expr>) -> Self {
         Self::Coalesce { params }
     }
 
-    pub(crate) fn min(params: Vec<FormulaExpression>) -> Self {
+    pub(crate) fn min(params: Vec<Expr>) -> Self {
         Self::Min { params }
     }
 
-    pub(crate) fn max(params: Vec<FormulaExpression>) -> Self {
+    pub(crate) fn max(params: Vec<Expr>) -> Self {
         Self::Max { params }
     }
 }
 
-impl std::fmt::Display for FormulaExpression {
+impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.generate_string(false))
     }
@@ -151,9 +149,9 @@ enum BracketComponents {
 }
 
 /// Display helpers for `FormulaExpression`.
-impl FormulaExpression {
+impl Expr {
     fn join_params(
-        params: &[FormulaExpression],
+        params: &[Expr],
         separator: &str,
         prefix: Option<&str>,
         bracket_components: BracketComponents,
@@ -188,7 +186,15 @@ impl FormulaExpression {
     fn generate_string(&self, bracket_whole: bool) -> String {
         match self {
             Self::Neg { param } => format!("-{}", param.generate_string(true)),
-            Self::Number { value } => value.to_string(),
+            Self::Number { value } => {
+                if value.fract() == 0.0 {
+                    // For whole numbers, format with one decimal place.
+                    format!("{:.1}", value)
+                } else {
+                    // else format normally.
+                    format!("{}", value)
+                }
+            }
             Self::Component { component_id } => format!("#{}", component_id),
             Self::Add { params } => {
                 Self::join_params(params, " + ", None, BracketComponents::None, bracket_whole)
@@ -215,10 +221,10 @@ impl FormulaExpression {
 
 #[cfg(test)]
 mod tests {
-    use super::FormulaExpression;
+    use super::Expr;
 
     #[track_caller]
-    fn assert_expr(exprs: &[FormulaExpression], expected: &str) {
+    fn assert_expr(exprs: &[Expr], expected: &str) {
         for expr in exprs {
             assert_eq!(expr.to_string(), expected);
         }
@@ -226,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_arithmatic() {
-        let comp = FormulaExpression::component;
+        let comp = Expr::component;
 
         assert_expr(
             &[
@@ -326,11 +332,11 @@ mod tests {
 
     #[test]
     fn test_functions() {
-        let comp = FormulaExpression::component;
-        let coalesce = FormulaExpression::coalesce;
-        let number = FormulaExpression::number;
-        let min = FormulaExpression::min;
-        let max = FormulaExpression::max;
+        let comp = Expr::component;
+        let coalesce = Expr::coalesce;
+        let number = Expr::number;
+        let min = Expr::min;
+        let max = Expr::max;
 
         assert_expr(
             &[comp(1)
@@ -341,7 +347,7 @@ mod tests {
                 ])],
             concat!(
                 "#1 - (COALESCE(#5, #7 + #6) + COALESCE(#2, #3)) + ",
-                "COALESCE(MAX(0, #5), MAX(0, #7) + MAX(0, #6))"
+                "COALESCE(MAX(0.0, #5), MAX(0.0, #7) + MAX(0.0, #6))"
             ),
         );
 
@@ -352,7 +358,7 @@ mod tests {
                     comp(7),
                     number(22.44),
                 ])],
-            "MIN(0, #5, #7 + #6) - MAX(COALESCE(#5, #7 + #6), #7, 22.44)",
+            "MIN(0.0, #5, #7 + #6) - MAX(COALESCE(#5, #7 + #6), #7, 22.44)",
         )
     }
 }

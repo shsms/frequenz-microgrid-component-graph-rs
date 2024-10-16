@@ -9,8 +9,6 @@
 //! - the `TestGraphBuilder`, which can declaratively build complicated
 //!   component configurations for use in tests.
 
-use std::collections::HashMap;
-
 use crate::{
     BatteryType, ComponentCategory, ComponentGraph, Edge, Error, EvChargerType, InverterType, Node,
 };
@@ -70,7 +68,6 @@ pub(super) struct ComponentGraphBuilder {
     components: Vec<TestComponent>,
     connections: Vec<TestConnection>,
     next_id: u64,
-    category_map: HashMap<ComponentHandle, ComponentCategory>,
 }
 
 impl ComponentGraphBuilder {
@@ -80,7 +77,6 @@ impl ComponentGraphBuilder {
             components: Vec::new(),
             connections: Vec::new(),
             next_id: 0,
-            category_map: HashMap::new(),
         };
         builder
     }
@@ -92,7 +88,6 @@ impl ComponentGraphBuilder {
         self.components
             .push(TestComponent::new(id, category.clone()));
         let handle = ComponentHandle(id);
-        self.category_map.insert(handle, category);
         handle
     }
 
@@ -169,6 +164,24 @@ impl ComponentGraphBuilder {
         for _ in 0..num_inverters {
             let inverter = self.solar_inverter();
             self.connect(meter, inverter);
+        }
+        meter
+    }
+
+    pub(super) fn meter_chp_chain(&mut self, num_chp: usize) -> ComponentHandle {
+        let meter = self.meter();
+        for _ in 0..num_chp {
+            let chp = self.chp();
+            self.connect(meter, chp);
+        }
+        meter
+    }
+
+    pub(super) fn meter_ev_charger_chain(&mut self, num_ev_chargers: usize) -> ComponentHandle {
+        let meter = self.meter();
+        for _ in 0..num_ev_chargers {
+            let ev_charger = self.ev_charger();
+            self.connect(meter, ev_charger);
         }
         meter
     }
