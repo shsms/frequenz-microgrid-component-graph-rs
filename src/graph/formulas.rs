@@ -22,4 +22,9 @@ where
     pub fn consumer_formula(&self) -> Result<String, Error> {
         generators::consumer::ConsumerFormulaBuilder::try_new(self)?.build()
     }
+
+    /// Returns a string representing the grid formula for the graph.
+    pub fn grid_formula(&self) -> Result<String, Error> {
+        generators::grid::GridFormulaBuilder::try_new(self)?.build()
+    }
 }

@@ -4,3 +4,4 @@
 //! Formula generators for standard metrics.
 
 pub(super) mod consumer;
+pub(super) mod grid;
