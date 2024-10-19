@@ -49,4 +49,12 @@ where
     pub fn pv_formula(&self, pv_inverter_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
         generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
     }
+
+    /// Returns a string representing the EV charger formula for the graph.
+    pub fn ev_charger_formula(
+        &self,
+        ev_charger_ids: Option<BTreeSet<u64>>,
+    ) -> Result<String, Error> {
+        generators::ev_charger::EVChargerFormulaBuilder::try_new(self, ev_charger_ids)?.build()
+    }
 }
