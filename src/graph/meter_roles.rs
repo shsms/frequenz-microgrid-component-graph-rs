@@ -126,6 +126,20 @@ where
             })
             && has_successors)
     }
+
+    /// Returns true if the node is a component meter.
+    ///
+    /// A meter is a component meter if it is one of the following:
+    ///  - a PV meter,
+    ///  - a battery meter,
+    ///  - an EV charger meter,
+    ///  - a CHP meter.
+    pub fn is_component_meter(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_pv_meter(component_id)?
+            || self.is_battery_meter(component_id)?
+            || self.is_ev_charger_meter(component_id)?
+            || self.is_chp_meter(component_id)?)
+    }
 }
 
 #[cfg(test)]
