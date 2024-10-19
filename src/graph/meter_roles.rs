@@ -36,7 +36,7 @@ where
         Ok(self.component(component_id)?.is_meter()
             && self.successors(component_id)?.all(|n| {
                 has_successors = true;
-                n.is_battery_inverter()
+                n.is_battery_inverter(&self.config)
             })
             && has_successors)
     }

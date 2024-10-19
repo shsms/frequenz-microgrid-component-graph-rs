@@ -5,4 +5,9 @@
 
 /// Configuration options for the `ComponentGraph`.
 #[derive(Clone, Default, Debug)]
-pub struct ComponentGraphConfig {}
+pub struct ComponentGraphConfig {
+    /// Whether to allow untyped inverters in the graph.  When this is `true`,
+    /// inverters that have `InverterType::Unspecified` will be assumed to be
+    /// Battery inverters.
+    pub allow_unspecified_inverters: bool,
+}

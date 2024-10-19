@@ -5,6 +5,7 @@
 //! category of a component.
 
 use crate::graph_traits::Node;
+use crate::ComponentGraphConfig;
 use std::fmt::Display;
 
 /// Represents the type of an inverter.
@@ -135,8 +136,14 @@ pub(crate) trait CategoryPredicates: Node {
         matches!(self.category(), ComponentCategory::Inverter(_))
     }
 
-    fn is_battery_inverter(&self) -> bool {
-        self.category() == ComponentCategory::Inverter(InverterType::Battery)
+    fn is_battery_inverter(&self, config: &ComponentGraphConfig) -> bool {
+        match self.category() {
+            ComponentCategory::Inverter(InverterType::Battery) => true,
+            ComponentCategory::Inverter(InverterType::Unspecified) => {
+                config.allow_unspecified_inverters
+            }
+            _ => false,
+        }
     }
 
     fn is_pv_inverter(&self) -> bool {
@@ -147,8 +154,13 @@ pub(crate) trait CategoryPredicates: Node {
         self.category() == ComponentCategory::Inverter(InverterType::Hybrid)
     }
 
-    fn is_unspecified_inverter(&self) -> bool {
-        self.category() == ComponentCategory::Inverter(InverterType::Unspecified)
+    fn is_unspecified_inverter(&self, config: &ComponentGraphConfig) -> bool {
+        match self.category() {
+            ComponentCategory::Inverter(InverterType::Unspecified) => {
+                !config.allow_unspecified_inverters
+            }
+            _ => false,
+        }
     }
 
     fn is_ev_charger(&self) -> bool {

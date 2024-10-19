@@ -111,7 +111,7 @@ where
     ) -> Result<Option<Vec<Expr>>, Error> {
         let mut exprs = vec![];
         let component = self.graph.component(component_id)?;
-        if component.is_battery_inverter()
+        if component.is_battery_inverter(&self.graph.config)
             || component.is_chp()
             || component.is_pv_inverter()
             || component.is_ev_charger()

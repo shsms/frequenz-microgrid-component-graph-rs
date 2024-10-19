@@ -29,7 +29,11 @@ where
         let inverter_ids = if let Some(battery_ids) = battery_ids {
             Self::find_inverter_ids(graph, &battery_ids)?
         } else {
-            graph.find_all(graph.root_id, |node| node.is_battery_inverter(), false)?
+            graph.find_all(
+                graph.root_id,
+                |node| node.is_battery_inverter(&graph.config),
+                false,
+            )?
         };
         Ok(Self {
             graph,
@@ -86,7 +90,9 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{graph::test_utils::ComponentGraphBuilder, Error};
+    use crate::{
+        graph::test_utils::ComponentGraphBuilder, ComponentGraphConfig, Error, InverterType,
+    };
 
     #[test]
     fn test_battery_formula() -> Result<(), Error> {
@@ -172,12 +178,23 @@ mod tests {
         assert_eq!(meter.component_id(), 17);
         assert_eq!(inv_bat_chain.component_id(), 18);
 
-        let inv_bat_chain = builder.inv_bat_chain(1);
-        builder.connect(meter, inv_bat_chain);
+        let unspec_inverter = builder.add_component(crate::ComponentCategory::Inverter(
+            InverterType::Unspecified,
+        ));
+        let battery = builder.battery();
+        builder.connect(unspec_inverter, battery);
+        builder.connect(meter, unspec_inverter);
 
-        assert_eq!(inv_bat_chain.component_id(), 20);
+        assert_eq!(unspec_inverter.component_id(), 20);
 
-        let graph = builder.build(None)?;
+        assert!(builder
+            .build(None)
+            .is_err_and(|x| x.to_string()
+                == "InvalidComponent: InverterType not specified for inverter: 20"));
+
+        let graph = builder.build(Some(ComponentGraphConfig {
+            allow_unspecified_inverters: true,
+        }))?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(
             formula,

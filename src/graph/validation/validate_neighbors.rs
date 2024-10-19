@@ -79,10 +79,20 @@ where
                     self.ensure_on_successors(inverter, |n| n.is_battery(), "Batteries")?;
                 }
                 InverterType::Unspecified => {
-                    return Err(Error::invalid_graph(format!(
-                        "Inverter {} has an unspecified inverter type.",
-                        inverter.component_id()
-                    )));
+                    if !self.cg.config.allow_unspecified_inverters {
+                        return Err(Error::invalid_graph(format!(
+                            "Inverter {} has an unspecified inverter type.",
+                            inverter.component_id()
+                        )));
+                    } else {
+                        tracing::warn!(
+                            concat!(
+                                "Inverter {} has an unspecified inverter type will be ",
+                                "considered a Battery Inverter."
+                            ),
+                            inverter.component_id()
+                        );
+                    }
                 }
             }
         }
@@ -98,7 +108,7 @@ where
             self.ensure_leaf(battery)?;
             self.ensure_on_predecessors(
                 battery,
-                |n| n.is_battery_inverter() || n.is_hybrid_inverter(),
+                |n| n.is_battery_inverter(&self.cg.config) || n.is_hybrid_inverter(),
                 "BatteryInverters or HybridInverters",
             )?;
         }

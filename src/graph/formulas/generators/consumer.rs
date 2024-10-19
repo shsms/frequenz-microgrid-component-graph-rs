@@ -44,7 +44,7 @@ where
         let other_grid_successors = self
             .graph
             .successors(self.graph.root_id)?
-            .filter(|s| !s.is_meter() && !s.is_battery_inverter())
+            .filter(|s| !s.is_meter() && !s.is_battery_inverter(&self.graph.config))
             .map(|s| self.component_consumption(s.component_id()))
             .reduce(|a, b| Ok(a? + b?));
 
