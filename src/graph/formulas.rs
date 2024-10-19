@@ -39,4 +39,9 @@ where
     pub fn battery_formula(&self, battery_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
         generators::battery::BatteryFormulaBuilder::try_new(self, battery_ids)?.build()
     }
+
+    /// Returns a string representing the CHP formula for the graph.
+    pub fn chp_formula(&self, chp_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
+        generators::chp::CHPFormulaBuilder::try_new(self, chp_ids)?.build()
+    }
 }
