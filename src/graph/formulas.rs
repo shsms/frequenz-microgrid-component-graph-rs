@@ -27,4 +27,9 @@ where
     pub fn grid_formula(&self) -> Result<String, Error> {
         generators::grid::GridFormulaBuilder::try_new(self)?.build()
     }
+
+    /// Returns a string representing the producer formula for the graph.
+    pub fn producer_formula(&self) -> Result<String, Error> {
+        generators::producer::ProducerFormulaBuilder::try_new(self)?.build()
+    }
 }
