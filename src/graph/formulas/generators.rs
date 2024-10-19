@@ -5,3 +5,4 @@
 
 pub(super) mod consumer;
 pub(super) mod grid;
+pub(super) mod producer;
