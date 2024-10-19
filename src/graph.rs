@@ -9,6 +9,7 @@ mod meter_roles;
 mod retrieval;
 mod validation;
 
+mod formulas;
 pub mod iterators;
 
 use crate::{Edge, Node};
