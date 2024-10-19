@@ -3,7 +3,7 @@
 
 //! Methods for retrieving components and connections from a [`ComponentGraph`].
 
-use crate::iterators::{Components, Connections, Neighbors};
+use crate::iterators::{Components, Connections, Neighbors, Siblings};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 /// `Component` and `Connection` retrieval.
@@ -72,6 +72,39 @@ where
                 Error::component_not_found(format!("Component with id {} not found.", component_id))
             })
     }
+
+    /// Returns an iterator over the *siblings* of the component with the
+    /// given `component_id`, that have shared predecessors.
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub(crate) fn siblings_from_predecessors(
+        &self,
+        component_id: u64,
+    ) -> Result<Siblings<N>, Error> {
+        Ok(Siblings::new(
+            component_id,
+            self.predecessors(component_id)?
+                .map(|x| self.successors(x.component_id()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten(),
+        ))
+    }
+
+    /// Returns an iterator over the *siblings* of the component with the
+    /// given `component_id`, that have shared successors.
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub(crate) fn siblings_from_successors(&self, component_id: u64) -> Result<Siblings<N>, Error> {
+        Ok(Siblings::new(
+            component_id,
+            self.successors(component_id)?
+                .map(|x| self.predecessors(x.component_id()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -80,6 +113,7 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::CategoryPredicates;
     use crate::error::Error;
+    use crate::graph::test_utils::ComponentGraphBuilder;
     use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
@@ -191,6 +225,89 @@ mod tests {
         assert!(graph
             .successors(32)
             .is_err_and(|e| e == Error::component_not_found("Component with id 32 not found.")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_siblings() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        // Add a grid meter to the grid, with no successors.
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+
+        assert_eq!(grid_meter.component_id(), 1);
+
+        // Add a battery chain with three inverters and two battery.
+        let meter_bat_chain = builder.meter_bat_chain(3, 2);
+        builder.connect(grid_meter, meter_bat_chain);
+
+        assert_eq!(meter_bat_chain.component_id(), 2);
+
+        let graph = builder.build()?;
+        assert_eq!(
+            graph
+                .siblings_from_predecessors(3)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [
+                &TestComponent::new(5, ComponentCategory::Inverter(InverterType::Battery)),
+                &TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery))
+            ]
+        );
+
+        assert_eq!(
+            graph
+                .siblings_from_successors(3)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [
+                &TestComponent::new(5, ComponentCategory::Inverter(InverterType::Battery)),
+                &TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery))
+            ]
+        );
+
+        assert_eq!(
+            graph
+                .siblings_from_successors(6)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            Vec::<&TestComponent>::new()
+        );
+
+        assert_eq!(
+            graph
+                .siblings_from_predecessors(6)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [&TestComponent::new(
+                7,
+                ComponentCategory::Battery(BatteryType::LiIon)
+            )]
+        );
+
+        // Add two dangling meter to the grid meter
+        let dangling_meter = builder.meter();
+        builder.connect(grid_meter, dangling_meter);
+        assert_eq!(dangling_meter.component_id(), 8);
+
+        let dangling_meter = builder.meter();
+        builder.connect(grid_meter, dangling_meter);
+        assert_eq!(dangling_meter.component_id(), 9);
+
+        let graph = builder.build()?;
+        assert_eq!(
+            graph
+                .siblings_from_predecessors(8)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [
+                &TestComponent::new(9, ComponentCategory::Meter),
+                &TestComponent::new(2, ComponentCategory::Meter),
+            ]
+        );
 
         Ok(())
     }
