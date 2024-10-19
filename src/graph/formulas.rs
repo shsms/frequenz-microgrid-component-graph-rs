@@ -3,6 +3,8 @@
 
 //! Methods for building formulas for various microgrid metrics.
 
+use std::collections::BTreeSet;
+
 use crate::ComponentGraph;
 use crate::Edge;
 use crate::Error;
@@ -31,5 +33,10 @@ where
     /// Returns a string representing the producer formula for the graph.
     pub fn producer_formula(&self) -> Result<String, Error> {
         generators::producer::ProducerFormulaBuilder::try_new(self)?.build()
+    }
+
+    /// Returns a string representing the battery formula for the graph.
+    pub fn battery_formula(&self, battery_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
+        generators::battery::BatteryFormulaBuilder::try_new(self, battery_ids)?.build()
     }
 }
