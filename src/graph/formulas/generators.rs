@@ -6,6 +6,7 @@
 pub(super) mod battery;
 pub(super) mod chp;
 pub(super) mod consumer;
+pub(super) mod ev_charger;
 pub(super) mod grid;
 pub(super) mod producer;
 pub(super) mod pv;
