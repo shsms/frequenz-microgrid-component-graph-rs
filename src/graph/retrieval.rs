@@ -80,7 +80,7 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::CategoryPredicates;
     use crate::error::Error;
-    use crate::graph::test_types::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::InverterType;
 
