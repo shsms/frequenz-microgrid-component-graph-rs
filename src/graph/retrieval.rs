@@ -5,6 +5,7 @@
 
 use crate::iterators::{Components, Connections, Neighbors, Siblings};
 use crate::{ComponentGraph, Edge, Error, Node};
+use std::collections::BTreeSet;
 
 /// `Component` and `Connection` retrieval.
 impl<N, E> ComponentGraph<N, E>
@@ -104,6 +105,41 @@ where
                 .into_iter()
                 .flatten(),
         ))
+    }
+
+    /// Returns a set of all components that match the given predicate, starting
+    /// from the component with the given `component_id`.
+    ///
+    /// If `follow_after_match` is `true`, the search continues deeper beyond
+    /// the matching components.
+    pub(crate) fn find_all(
+        &self,
+        from: u64,
+        mut pred: impl FnMut(&N) -> bool,
+        follow_after_match: bool,
+    ) -> Result<BTreeSet<u64>, Error> {
+        let index = self.node_indices.get(&from).ok_or_else(|| {
+            Error::component_not_found(format!("Component with id {} not found.", from))
+        })?;
+        let mut stack = vec![*index];
+        let mut found = BTreeSet::new();
+
+        while let Some(index) = stack.pop() {
+            let node = &self.graph[index];
+            if pred(node) {
+                found.insert(node.component_id());
+                if !follow_after_match {
+                    continue;
+                }
+            }
+
+            let neighbors = self
+                .graph
+                .neighbors_directed(index, petgraph::Direction::Outgoing);
+            stack.extend(neighbors);
+        }
+
+        Ok(found)
     }
 }
 
@@ -308,6 +344,47 @@ mod tests {
                 &TestComponent::new(2, ComponentCategory::Meter),
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_all() -> Result<(), Error> {
+        let (components, connections) = nodes_and_edges();
+        let graph = ComponentGraph::try_new(components.clone(), connections.clone())?;
+
+        let found = graph.find_all(graph.root_id, |x| x.is_meter(), false)?;
+        assert_eq!(found, [2].iter().cloned().collect());
+
+        let found = graph.find_all(graph.root_id, |x| x.is_meter(), true)?;
+        assert_eq!(found, [2, 3, 6].iter().cloned().collect());
+
+        let found = graph.find_all(
+            graph.root_id,
+            |x| !x.is_grid() && !graph.is_component_meter(x.component_id()).unwrap_or(false),
+            true,
+        )?;
+        assert_eq!(found, [2, 4, 5, 7, 8].iter().cloned().collect());
+
+        let found = graph.find_all(
+            6,
+            |x| !x.is_grid() && !graph.is_component_meter(x.component_id()).unwrap_or(false),
+            true,
+        )?;
+        assert_eq!(found, [7, 8].iter().cloned().collect());
+
+        let found = graph.find_all(
+            graph.root_id,
+            |x| !x.is_grid() && !graph.is_component_meter(x.component_id()).unwrap_or(false),
+            false,
+        )?;
+        assert_eq!(found, [2].iter().cloned().collect());
+
+        let found = graph.find_all(graph.root_id, |_| true, false)?;
+        assert_eq!(found, [1].iter().cloned().collect());
+
+        let found = graph.find_all(3, |_| true, true)?;
+        assert_eq!(found, [3, 4, 5].iter().cloned().collect());
 
         Ok(())
     }
