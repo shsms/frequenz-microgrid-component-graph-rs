@@ -44,4 +44,9 @@ where
     pub fn chp_formula(&self, chp_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
         generators::chp::CHPFormulaBuilder::try_new(self, chp_ids)?.build()
     }
+
+    /// Returns a string representing the PV formula for the graph.
+    pub fn pv_formula(&self, pv_inverter_ids: Option<BTreeSet<u64>>) -> Result<String, Error> {
+        generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
+    }
 }
