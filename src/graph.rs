@@ -12,7 +12,7 @@ mod validation;
 mod formulas;
 pub mod iterators;
 
-use crate::{Edge, Node};
+use crate::{ComponentGraphConfig, Edge, Node};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
@@ -40,6 +40,7 @@ where
     node_indices: NodeIndexMap,
     root_id: u64,
     edges: EdgeMap<E>,
+    config: ComponentGraphConfig,
 }
 
 #[cfg(test)]

@@ -10,7 +10,8 @@
 //!   graph configurations for use in tests.
 
 use crate::{
-    BatteryType, ComponentCategory, ComponentGraph, Edge, Error, EvChargerType, InverterType, Node,
+    BatteryType, ComponentCategory, ComponentGraph, ComponentGraphConfig, Edge, Error,
+    EvChargerType, InverterType, Node,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +211,10 @@ impl ComponentGraphBuilder {
     /// Builds and returns the component graph from the components and
     /// connections added to the builder.
     pub(super) fn build(&self) -> Result<ComponentGraph<TestComponent, TestConnection>, Error> {
-        ComponentGraph::try_new(self.components.clone(), self.connections.clone())
+        ComponentGraph::try_new(
+            self.components.clone(),
+            self.connections.clone(),
+            ComponentGraphConfig::default(),
+        )
     }
 }

@@ -86,6 +86,7 @@ mod tests {
     use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::ComponentGraph;
+    use crate::ComponentGraphConfig;
     use crate::InverterType;
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
@@ -118,17 +119,24 @@ mod tests {
 
     #[test]
     fn test_connected_graph_validation() {
+        let config = ComponentGraphConfig::default();
         let (mut components, mut connections) = nodes_and_edges();
 
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
         components.push(TestComponent::new(11, ComponentCategory::Meter));
-        let Err(err) = ComponentGraph::try_new(components.clone(), connections.clone()) else {
+        let Err(err) =
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+        else {
             panic!()
         };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(
-                |e| e == Error::invalid_graph("Nodes [11] are not connected to the root.")
-            ),
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(
+                    |e| e == Error::invalid_graph("Nodes [11] are not connected to the root.")
+                ),
             "{:?}",
             err
         );
@@ -136,82 +144,94 @@ mod tests {
         components.push(TestComponent::new(12, ComponentCategory::Meter));
 
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(
-                |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
-            )
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(
+                    |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
+                )
         );
 
         connections.push(TestConnection::new(11, 12));
 
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(
-                |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
-            )
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(
+                    |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
+                )
         );
 
         connections.pop();
         components.pop();
         components.pop();
 
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_acyclicity_validation() {
+        let config = ComponentGraphConfig::default();
         let (components, mut connections) = nodes_and_edges();
 
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
 
         // add cycles at different levels
         connections.push(TestConnection::new(3, 2));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 2")),
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 2));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 4 -> 2"))
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 2));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2"))
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 3));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 3 -> 4 -> 3"))
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 3));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 3 -> 4 -> 5 -> 3"))
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 4));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 4 -> 5 -> 4"))
         );
 
         connections.pop();
         connections.push(TestConnection::new(9, 2));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 9 -> 2"))
         );
 
         connections.pop();
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
     }
 }

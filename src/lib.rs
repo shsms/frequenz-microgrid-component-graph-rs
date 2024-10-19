@@ -65,3 +65,6 @@ pub use graph_traits::{Edge, Node};
 
 mod error;
 pub use error::Error;
+
+mod config;
+pub use config::ComponentGraphConfig;

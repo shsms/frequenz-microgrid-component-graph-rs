@@ -6,7 +6,7 @@
 
 use petgraph::graph::DiGraph;
 
-use crate::{component_category::CategoryPredicates, Edge, Error, Node};
+use crate::{component_category::CategoryPredicates, ComponentGraphConfig, Edge, Error, Node};
 
 use super::{ComponentGraph, EdgeMap, NodeIndexMap};
 
@@ -22,8 +22,9 @@ where
     pub fn try_new<NodeIterator: IntoIterator<Item = N>, EdgeIterator: IntoIterator<Item = E>>(
         components: NodeIterator,
         connections: EdgeIterator,
+        config: ComponentGraphConfig,
     ) -> Result<Self, Error> {
-        let (graph, indices) = Self::create_graph(components)?;
+        let (graph, indices) = Self::create_graph(components, &config)?;
         let root_id = Self::find_root(&graph)?.component_id();
 
         let mut cg = Self {
@@ -31,6 +32,7 @@ where
             node_indices: indices,
             root_id,
             edges: EdgeMap::new(),
+            config,
         };
         cg.add_connections(connections)?;
 
@@ -56,6 +58,7 @@ where
 
     fn create_graph(
         components: impl IntoIterator<Item = N>,
+        config: &ComponentGraphConfig,
     ) -> Result<(DiGraph<N, ()>, NodeIndexMap), Error> {
         let mut graph = DiGraph::new();
         let mut indices = NodeIndexMap::new();
@@ -146,28 +149,35 @@ mod tests {
 
     #[test]
     fn test_component_validation() {
+        let config = ComponentGraphConfig::default();
         let (mut components, mut connections) = nodes_and_edges();
 
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),
         );
 
         components.push(TestComponent::new(1, ComponentCategory::Grid));
         connections.push(TestConnection::new(1, 2));
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
 
         components.push(TestComponent::new(2, ComponentCategory::Meter));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2"))
         );
 
         components.pop();
         components.push(TestComponent::new(9, ComponentCategory::Unspecified));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| e
-                == Error::invalid_component("ComponentCategory not specified for component: 9"))
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(|e| e
+                    == Error::invalid_component(
+                        "ComponentCategory not specified for component: 9"
+                    ))
         );
 
         components.pop();
@@ -176,24 +186,29 @@ mod tests {
             ComponentCategory::Inverter(InverterType::Unspecified),
         ));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(
-                |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
-            )
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(
+                    |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
+                )
         );
 
         components.pop();
         components.push(TestComponent::new(9, ComponentCategory::Grid));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone())
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found."))
         );
 
         components.pop();
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_connection_validation() {
+        let config = ComponentGraphConfig::default();
         let (mut components, mut connections) = nodes_and_edges();
 
         components.push(TestComponent::new(1, ComponentCategory::Grid));
@@ -201,20 +216,27 @@ mod tests {
 
         connections.push(TestConnection::new(2, 2));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| e
-                == Error::invalid_connection(
-                    "Connection:(2, 2) Can't connect a component to itself."
-                ))
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(|e| e
+                    == Error::invalid_connection(
+                        "Connection:(2, 2) Can't connect a component to itself."
+                    ))
         );
 
         connections.pop();
         connections.push(TestConnection::new(2, 9));
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone()).is_err_and(|e| e
-                == Error::invalid_connection("Connection:(2, 9) Can't find a component with ID 9"))
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(|e| e
+                    == Error::invalid_connection(
+                        "Connection:(2, 9) Can't find a component with ID 9"
+                    ))
         );
 
         connections.pop();
-        assert!(ComponentGraph::try_new(components.clone(), connections.clone()).is_ok());
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_ok()
+        );
     }
 }
