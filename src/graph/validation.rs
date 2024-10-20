@@ -38,8 +38,14 @@ where
         validator.validate_acyclicity(root, vec![])?;
 
         let mut errors = vec![];
+        let mut validation_failed = false;
+
+        if let Err(err) = validator.validate_connected_graph(root) {
+            errors.push(err);
+            validation_failed = !self.config.allow_unconnected_components;
+        }
+
         for result in [
-            validator.validate_connected_graph(root),
             validator.validate_root(),
             validator.validate_meters(),
             validator.validate_inverters(),
@@ -49,18 +55,33 @@ where
         ] {
             if let Err(e) = result {
                 errors.push(e);
+                validation_failed = true;
             }
         }
-        if errors.len() == 1 {
-            return Err(errors[0].clone());
-        } else if !errors.is_empty() {
-            let error_messages = "Multiple validation failures:\n    ".to_string()
-                + &errors
-                    .into_iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n    ");
-            return Err(Error::invalid_graph(error_messages));
+        match errors.len() {
+            0 => {}
+            1 => {
+                if validation_failed {
+                    return Err(errors[0].clone());
+                } else {
+                    tracing::warn!("{}", errors[0]);
+                }
+            }
+            _ => {
+                let err = Error::invalid_graph(format!(
+                    "Multiple validation failures:\n    {}",
+                    errors
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n    ")
+                ));
+                if validation_failed {
+                    return Err(err);
+                } else {
+                    tracing::warn!("{}", err);
+                }
+            }
         }
         Ok(())
     }

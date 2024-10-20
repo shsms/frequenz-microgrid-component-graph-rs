@@ -152,12 +152,23 @@ mod tests {
 
         connections.push(TestConnection::new(11, 12));
 
+        // With the default config, this fails validation.
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(
                     |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
                 )
         );
+        // With `allow_unconnected_components=true`, this passes validation.
+        assert!(ComponentGraph::try_new(
+            components.clone(),
+            connections.clone(),
+            ComponentGraphConfig {
+                allow_unconnected_components: true,
+                ..config.clone()
+            }
+        )
+        .is_ok());
 
         connections.pop();
         components.pop();

@@ -194,6 +194,7 @@ mod tests {
 
         let graph = builder.build(Some(ComponentGraphConfig {
             allow_unspecified_inverters: true,
+            ..Default::default()
         }))?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(

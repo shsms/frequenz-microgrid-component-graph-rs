@@ -175,7 +175,8 @@ mod tests {
         // are treated as battery inverters.
         assert!(builder
             .build(Some(ComponentGraphConfig {
-                allow_unspecified_inverters: true
+                allow_unspecified_inverters: true,
+                ..Default::default()
             }))
             .is_ok());
 
