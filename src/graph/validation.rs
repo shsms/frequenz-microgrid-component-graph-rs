@@ -55,7 +55,7 @@ where
         ] {
             if let Err(e) = result {
                 errors.push(e);
-                validation_failed = true;
+                validation_failed = !self.config.allow_component_validation_failures;
             }
         }
         match errors.len() {

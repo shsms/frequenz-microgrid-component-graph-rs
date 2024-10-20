@@ -275,6 +275,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestConnection::new(2, 3),
             TestConnection::new(3, 4),
         ];
+        // With default config, this validation fails
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
@@ -283,6 +284,16 @@ r#"InvalidGraph: Multiple validation failures:
                     )
                 }),
         );
+        // With `allow_component_validation_failures=true`, this would pass.
+        assert!(ComponentGraph::try_new(
+            components.clone(),
+            connections.clone(),
+            ComponentGraphConfig {
+                allow_component_validation_failures: true,
+                ..config.clone()
+            }
+        )
+        .is_ok());
 
         components.pop();
         connections.pop();

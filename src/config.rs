@@ -6,6 +6,11 @@
 /// Configuration options for the `ComponentGraph`.
 #[derive(Clone, Default, Debug)]
 pub struct ComponentGraphConfig {
+    /// Whether to allow validation errors on components.  When this is `true`,
+    /// the graph will be built even if there are validation errors on
+    /// components.
+    pub allow_component_validation_failures: bool,
+
     /// Whether to allow unconnected components in the graph, that are not
     /// reachable from the root.
     pub allow_unconnected_components: bool,
