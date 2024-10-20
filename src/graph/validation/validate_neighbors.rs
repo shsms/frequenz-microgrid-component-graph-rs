@@ -196,12 +196,11 @@ mod tests {
         let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph(concat!(
-                    "Meter:2 can only have successors that are not Batteries. ",
-                    "Found Battery(LiIon):3."
-                ))
-            }),
-        );
+                e.to_string() ==
+r#"InvalidGraph: Multiple validation failures:
+    InvalidGraph: Meter:2 can only have successors that are not Batteries. Found Battery(LiIon):3.
+    InvalidGraph: Battery(LiIon):3 can only have predecessors that are BatteryInverters or HybridInverters. Found Meter:2."#
+            }));
     }
 
     #[test]

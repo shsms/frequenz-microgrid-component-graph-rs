@@ -11,7 +11,7 @@ macro_rules! ErrorKind {
         ($kind:ident, $ctor:ident)
     ),*) => {
         /// The kind of error that occurred.
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         pub(crate) enum ErrorKind {
             $(
                 $kind,
@@ -57,7 +57,7 @@ ErrorKind!(
 
 /// An error that can occur during the creation or traversal of a
 /// [ComponentGraph][crate::ComponentGraph].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
     desc: String,

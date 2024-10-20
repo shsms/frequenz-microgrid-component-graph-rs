@@ -33,16 +33,35 @@ where
 
         let validator = ComponentGraphValidator { cg: self, root };
 
+        // Fail immediately if there are cycles in the graph, as this may cause
+        // subsequent validations to get stuck in an infinite loop.
         validator.validate_acyclicity(root, vec![])?;
-        validator.validate_connected_graph(root)?;
 
-        validator.validate_root()?;
-        validator.validate_meters()?;
-        validator.validate_inverters()?;
-        validator.validate_batteries()?;
-        validator.validate_ev_chargers()?;
-        validator.validate_chps()?;
-
+        let mut errors = vec![];
+        for result in [
+            validator.validate_connected_graph(root),
+            validator.validate_root(),
+            validator.validate_meters(),
+            validator.validate_inverters(),
+            validator.validate_batteries(),
+            validator.validate_ev_chargers(),
+            validator.validate_chps(),
+        ] {
+            if let Err(e) = result {
+                errors.push(e);
+            }
+        }
+        if errors.len() == 1 {
+            return Err(errors[0].clone());
+        } else if !errors.is_empty() {
+            let error_messages = "Multiple validation failures:\n    ".to_string()
+                + &errors
+                    .into_iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n    ");
+            return Err(Error::invalid_graph(error_messages));
+        }
         Ok(())
     }
 }
