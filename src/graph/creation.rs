@@ -120,123 +120,83 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component_category::BatteryType;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{ComponentGraphBuilder, ComponentHandle};
     use crate::ComponentCategory;
     use crate::InverterType;
 
-    fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let components = vec![
-            TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(3, ComponentCategory::Meter),
-            TestComponent::new(5, ComponentCategory::Battery(BatteryType::LiIon)),
-            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(2, ComponentCategory::Meter),
-        ];
-        let connections = vec![
-            TestConnection::new(3, 4),
-            TestConnection::new(7, 8),
-            TestConnection::new(4, 5),
-            TestConnection::new(2, 3),
-            TestConnection::new(6, 7),
-            TestConnection::new(2, 6),
-        ];
+    fn nodes_and_edges() -> (ComponentGraphBuilder, ComponentHandle) {
+        let mut builder = ComponentGraphBuilder::new();
 
-        (components, connections)
+        let grid_meter = builder.meter();
+        let meter_bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid_meter, meter_bat_chain);
+
+        let meter_bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid_meter, meter_bat_chain);
+
+        (builder, grid_meter)
     }
 
     #[test]
     fn test_component_validation() {
-        let config = ComponentGraphConfig::default();
-        let (mut components, mut connections) = nodes_and_edges();
+        let (mut builder, grid_meter) = nodes_and_edges();
 
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),
-        );
+        assert!(builder
+            .build(None)
+            .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),);
 
-        components.push(TestComponent::new(1, ComponentCategory::Grid));
-        connections.push(TestConnection::new(1, 2));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
-        );
+        let grid = builder.grid();
+        builder.connect(grid, grid_meter);
 
-        components.push(TestComponent::new(2, ComponentCategory::Meter));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2"))
-        );
+        assert!(builder.build(None).is_ok());
 
-        components.pop();
-        components.push(TestComponent::new(9, ComponentCategory::Unspecified));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == Error::invalid_component(
-                        "ComponentCategory not specified for component: 9"
-                    ))
-        );
+        builder.add_component_with_id(2, ComponentCategory::Meter);
+        assert!(builder
+            .build(None)
+            .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2")));
 
-        components.pop();
-        components.push(TestComponent::new(
-            9,
-            ComponentCategory::Inverter(InverterType::Unspecified),
+        builder.pop_component();
+        builder.add_component(ComponentCategory::Unspecified);
+        assert!(builder
+            .build(None)
+            .is_err_and(|e| e
+                == Error::invalid_component("ComponentCategory not specified for component: 8")));
+
+        builder.pop_component();
+        builder.add_component(ComponentCategory::Inverter(InverterType::Unspecified));
+        assert!(builder.build(None).is_err_and(
+            |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
         ));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
-                )
-        );
 
-        components.pop();
-        components.push(TestComponent::new(9, ComponentCategory::Grid));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found."))
-        );
+        builder.pop_component();
+        builder.add_component(ComponentCategory::Grid);
+        assert!(builder
+            .build(None)
+            .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found.")));
 
-        components.pop();
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
-        );
+        builder.pop_component();
+        assert!(builder.build(None).is_ok());
     }
 
     #[test]
     fn test_connection_validation() {
-        let config = ComponentGraphConfig::default();
-        let (mut components, mut connections) = nodes_and_edges();
+        let (mut builder, grid_meter) = nodes_and_edges();
 
-        components.push(TestComponent::new(1, ComponentCategory::Grid));
-        connections.push(TestConnection::new(1, 2));
+        let grid = builder.grid();
+        builder.connect(grid, grid_meter);
 
-        connections.push(TestConnection::new(2, 2));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == Error::invalid_connection(
-                        "Connection:(2, 2) Can't connect a component to itself."
-                    ))
-        );
+        builder.connect(grid, grid);
+        assert!(builder.build(None).is_err_and(|e| e
+            == Error::invalid_connection(
+                "Connection:(7, 7) Can't connect a component to itself."
+            )));
+        builder.pop_connection();
 
-        connections.pop();
-        connections.push(TestConnection::new(2, 9));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == Error::invalid_connection(
-                        "Connection:(2, 9) Can't find a component with ID 9"
-                    ))
-        );
+        builder.connect(grid_meter, ComponentHandle::new(9));
+        assert!(builder.build(None).is_err_and(|e| e
+            == Error::invalid_connection("Connection:(0, 9) Can't find a component with ID 9")));
 
-        connections.pop();
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
-        );
+        builder.pop_connection();
+        assert!(builder.build(None).is_ok());
     }
 }
