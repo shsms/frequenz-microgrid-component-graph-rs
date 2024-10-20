@@ -210,11 +210,14 @@ impl ComponentGraphBuilder {
 
     /// Builds and returns the component graph from the components and
     /// connections added to the builder.
-    pub(super) fn build(&self) -> Result<ComponentGraph<TestComponent, TestConnection>, Error> {
+    pub(super) fn build(
+        &self,
+        config: Option<ComponentGraphConfig>,
+    ) -> Result<ComponentGraph<TestComponent, TestConnection>, Error> {
         ComponentGraph::try_new(
             self.components.clone(),
             self.connections.clone(),
-            ComponentGraphConfig::default(),
+            config.unwrap_or_default(),
         )
     }
 }

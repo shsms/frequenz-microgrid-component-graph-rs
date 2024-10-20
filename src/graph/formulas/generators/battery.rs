@@ -96,7 +96,7 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(formula, "0.0");
 
@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(grid_meter.component_id(), 1);
         assert_eq!(meter_bat_chain.component_id(), 2);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(formula, "COALESCE(#3, #2)");
 
@@ -117,7 +117,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 5);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(formula, "COALESCE(#3, #2) + COALESCE(#6, #5)");
 
@@ -138,7 +138,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 9);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(
             formula,
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(meter_pv_chain.component_id(), 14);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(
             formula,
@@ -177,7 +177,7 @@ mod tests {
 
         assert_eq!(inv_bat_chain.component_id(), 20);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.battery_formula(None)?;
         assert_eq!(
             formula,

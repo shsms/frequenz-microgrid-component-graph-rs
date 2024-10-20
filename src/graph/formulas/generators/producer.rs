@@ -76,14 +76,14 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(formula, "0.0");
 
         let meter_pv_chain = builder.meter_pv_chain(2);
         builder.connect(grid_meter, meter_pv_chain);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(formula, "MIN(0.0, COALESCE(#4 + #3, #2))");
 
@@ -91,7 +91,7 @@ mod tests {
         let meter_chp_chain = builder.meter_chp_chain(1);
         builder.connect(grid, meter_chp_chain);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(
             formula,
@@ -102,7 +102,7 @@ mod tests {
         let chp = builder.chp();
         builder.connect(grid, chp);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(
             formula,
@@ -113,7 +113,7 @@ mod tests {
         let pv_inverter = builder.solar_inverter();
         builder.connect(grid_meter, pv_inverter);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(
             formula,
@@ -127,7 +127,7 @@ mod tests {
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
         builder.connect(grid_meter, meter_bat_chain);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(
             formula,
@@ -145,7 +145,7 @@ mod tests {
         builder.connect(meter, chp);
         builder.connect(grid_meter, meter);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.producer_formula()?;
         assert_eq!(
             formula,

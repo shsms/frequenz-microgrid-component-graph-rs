@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(grid_meter.component_id(), 1);
         assert_eq!(meter_bat_chain.component_id(), 2);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let expr = graph.fallback_expr(vec![1, 2], false)?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2)");
 
@@ -185,7 +185,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 5);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let expr = graph.fallback_expr(vec![3, 5], false)?;
         assert_eq!(
             expr.to_string(),
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(chp.component_id(), 13);
         assert_eq!(pv_inverter.component_id(), 14);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let expr = graph.fallback_expr(vec![5, 12], true)?;
         assert_eq!(
             expr.to_string(),

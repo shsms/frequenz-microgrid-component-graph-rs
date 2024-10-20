@@ -58,7 +58,7 @@ mod tests {
         builder.connect(grid, grid_meter);
         builder.connect(grid_meter, meter_bat_chain);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.grid_formula()?;
         assert_eq!(formula, "#1");
 
@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 6);
         assert_eq!(meter_pv_chain.component_id(), 9);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.grid_formula()?;
         assert_eq!(formula, "#1 + #5 + COALESCE(#6, #7) + COALESCE(#9, #10)");
 
@@ -85,7 +85,7 @@ mod tests {
 
         assert_eq!(pv_inverter.component_id(), 11);
 
-        let graph = builder.build()?;
+        let graph = builder.build(None)?;
         let formula = graph.grid_formula()?;
         assert_eq!(
             formula,
