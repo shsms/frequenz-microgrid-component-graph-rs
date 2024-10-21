@@ -11,62 +11,6 @@ where
     N: Node,
     E: Edge,
 {
-    /// Returns true if a node is a grid meter.
-    ///
-    /// A meter is identified as a grid meter if:
-    ///   - it is a successor of the grid component,
-    ///   - all its siblings are meters,
-    ///   - if there are siblings, the successors of it and the successors of
-    ///     its siblings are meters.
-    pub fn is_grid_meter(&self, component_id: u64) -> Result<bool, Error> {
-        let component = self.component(component_id)?;
-
-        // Component must be a meter.
-        if !component.is_meter() {
-            return Ok(false);
-        }
-
-        let mut predecessors = self.predecessors(component_id)?;
-
-        // The meter must have a grid as a predecessor.
-        let Some(grid) = predecessors.next() else {
-            return Ok(false);
-        };
-
-        let has_multiple_predecessors = predecessors.next().is_some();
-
-        if !grid.is_grid() || has_multiple_predecessors {
-            return Ok(false);
-        }
-
-        // All siblings must be meters.
-        let mut num_grid_successors = 0;
-        let mut non_meter_successors = false;
-        for grid_successor in self.successors(grid.component_id())? {
-            if grid_successor.is_meter() {
-                num_grid_successors += 1;
-            } else {
-                return Ok(false);
-            }
-            let mut successors = self.successors(grid_successor.component_id())?;
-            if successors.any(|n| !n.is_meter()) {
-                non_meter_successors = true;
-            }
-        }
-
-        // If there are no siblings, the meter is a grid meter.
-        if num_grid_successors == 1 {
-            return Ok(true);
-        }
-
-        // If there are siblings, the meter is a grid meter if the successors of
-        // it and the successors of the siblings are meters.
-        if non_meter_successors {
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
     /// Returns true if the node is a PV meter.
     ///
     /// A meter is identified as a PV meter if:
@@ -271,29 +215,6 @@ mod tests {
         }
 
         Ok(found_meters)
-    }
-
-    #[test]
-    fn test_is_grid_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
-        assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_grid_meter)?,
-            vec![2],
-        );
-
-        let (components, connections) = with_multiple_grid_meters();
-        assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_grid_meter)?,
-            vec![2, 19, 20],
-        );
-
-        let (components, connections) = without_grid_meters();
-        assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_grid_meter)?,
-            vec![],
-        );
-
-        Ok(())
     }
 
     #[test]
