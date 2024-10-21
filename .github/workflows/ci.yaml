@@ -16,13 +16,7 @@ jobs:
       - name: Fetch sources
         uses: actions/checkout@v4
         with:
-          submodules: true
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run linter
-        run: cargo clippy -- -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
+          submodules: recursive
 
       - name: Run tests
-        run: cargo test
+        uses: frequenz-floss/gh-action-cargo-test@v1.0.0
