@@ -39,6 +39,19 @@ including checking that:
 
 If any of the validation steps fail, the method will return an [`Error`], and a
 [`ComponentGraph`] instance otherwise.
+
+## Formula generation
+
+The component graph library has methods for generating formulas for various
+metrics of the microgrid.  The following formulas are supported:
+
+- [`grid_formula`][ComponentGraph::grid_formula]
+- [`producer_formula`][ComponentGraph::producer_formula]
+- [`consumer_formula`][ComponentGraph::consumer_formula]
+- [`pv_formula`][ComponentGraph::pv_formula]
+- [`battery_formula`][ComponentGraph::battery_formula]
+- [`ev_charger_formula`][ComponentGraph::ev_charger_formula]
+- [`chp_formula`][ComponentGraph::chp_formula]
 */
 
 mod component_category;

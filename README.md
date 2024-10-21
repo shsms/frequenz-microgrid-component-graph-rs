@@ -6,7 +6,7 @@ connections between them as a Directed Acyclic Graph (DAG).
 Current features:
   - validating the graph
   - traversing the graph
+  - Formula generation
 
 Upcoming features:
-  - Formula generation
   - Python bindings

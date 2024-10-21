@@ -15,6 +15,7 @@ mod fallback;
 mod generators;
 mod traversal;
 
+/// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>
 where
     N: Node,
