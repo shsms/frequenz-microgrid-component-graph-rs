@@ -43,5 +43,23 @@ where
     config: ComponentGraphConfig,
 }
 
+/// Implement `Clone` for `ComponentGraph` when the `Node`s and `Edge`s
+/// implement `Clone`.
+impl<N, E> Clone for ComponentGraph<N, E>
+where
+    N: Node + Clone,
+    E: Edge + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            node_indices: self.node_indices.clone(),
+            root_id: self.root_id,
+            edges: self.edges.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_utils;
