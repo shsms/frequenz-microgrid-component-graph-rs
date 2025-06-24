@@ -6,6 +6,8 @@
 use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::expr::Expr;
+use crate::graph::formulas::Formula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct PVFormulaBuilder<'a, N, E>
@@ -46,9 +48,9 @@ where
     ///
     /// This is the sum of all PV inverters in the graph. If the pv_inverter_ids are provided,
     /// only the PV inverters with the given ids are included in the formula.
-    pub fn build(self) -> Result<String, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         if self.pv_inverter_ids.is_empty() {
-            return Ok("0.0".to_string());
+            return Ok(Formula::new(Expr::number(0.0)));
         }
 
         for id in &self.pv_inverter_ids {
@@ -62,7 +64,7 @@ where
 
         self.graph
             .fallback_expr(self.pv_inverter_ids, false)
-            .map(|expr| expr.to_string())
+            .map(Formula::new)
     }
 }
 
@@ -81,7 +83,7 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_formula(None)?;
+        let formula = graph.pv_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
         // Add a PV meter with one PV inverter.
@@ -92,7 +94,7 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_formula(None)?;
+        let formula = graph.pv_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
         // Add a battery meter with one inverter and two batteries.
@@ -102,7 +104,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 4);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_formula(None)?;
+        let formula = graph.pv_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
         // Add a PV meter with two PV inverters.
@@ -112,7 +114,7 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 8);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_formula(None)?;
+        let formula = graph.pv_formula(None)?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -121,7 +123,7 @@ mod tests {
             )
         );
 
-        let formula = graph.pv_formula(Some(BTreeSet::from([10, 3]))).unwrap();
+        let formula = graph.pv_formula(Some(BTreeSet::from([10, 3])))?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0) + COALESCE(#10, 0.0)");
 
         // add a meter direct to the grid with three PV inverters
@@ -131,7 +133,7 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_formula(None)?;
+        let formula = graph.pv_formula(None)?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -146,8 +148,8 @@ mod tests {
         );
 
         let formula = graph
-            .pv_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))
-            .unwrap();
+            .pv_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))?
+            .to_string();
         assert_eq!(
             formula,
             concat!(
@@ -159,8 +161,8 @@ mod tests {
         );
 
         let formula = graph
-            .pv_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))
-            .unwrap();
+            .pv_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))?
+            .to_string();
         assert_eq!(
             formula,
             concat!(
@@ -174,7 +176,9 @@ mod tests {
             )
         );
 
-        let formula = graph.pv_formula(Some(BTreeSet::from([10, 14]))).unwrap();
+        let formula = graph
+            .pv_formula(Some(BTreeSet::from([10, 14])))?
+            .to_string();
         assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
 
         // Failure cases:

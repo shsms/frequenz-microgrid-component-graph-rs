@@ -3,7 +3,10 @@
 
 //! This module contains the methods for generating grid formulas.
 
-use crate::{ComponentGraph, Edge, Error, Node};
+use crate::{
+    graph::formulas::{expr::Expr, Formula},
+    ComponentGraph, Edge, Error, Node,
+};
 
 pub(crate) struct GridFormulaBuilder<'a, N, E>
 where
@@ -27,7 +30,7 @@ where
     /// The grid formula is the sum of all components connected to the grid.
     /// This formula can be used for calculating power or current metrics at the
     /// grid connection point.
-    pub fn build(self) -> Result<String, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
             let comp = self.graph.fallback_expr([comp.component_id()], true)?;
@@ -37,8 +40,8 @@ where
             };
         }
         Ok(expr
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "0.0".to_string()))
+            .map(Formula::new)
+            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
     }
 }
 
@@ -59,7 +62,7 @@ mod tests {
         builder.connect(grid_meter, meter_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?;
+        let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "#1");
 
         // Add an additional dangling meter, and a PV chain and a battery chain
@@ -76,7 +79,7 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 9);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?;
+        let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
             "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0)"
@@ -89,7 +92,7 @@ mod tests {
         assert_eq!(pv_inverter.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?;
+        let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
             "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0) + COALESCE(#11, 0.0)"

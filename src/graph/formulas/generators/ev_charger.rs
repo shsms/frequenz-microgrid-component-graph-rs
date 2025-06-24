@@ -6,6 +6,8 @@
 use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::expr::Expr;
+use crate::graph::formulas::Formula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct EVChargerFormulaBuilder<'a, N, E>
@@ -46,9 +48,9 @@ where
     ///
     /// This is the sum of all EV chargers in the graph. If the ev_charger_ids are provided,
     /// only the EV chargers with the given ids are included in the formula.
-    pub fn build(self) -> Result<String, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         if self.ev_charger_ids.is_empty() {
-            return Ok("0.0".to_string());
+            return Ok(Formula::new(Expr::number(0.0)));
         }
 
         for id in &self.ev_charger_ids {
@@ -62,7 +64,7 @@ where
 
         self.graph
             .fallback_expr(self.ev_charger_ids, false)
-            .map(|expr| expr.to_string())
+            .map(Formula::new)
     }
 }
 
@@ -81,7 +83,7 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.ev_charger_formula(None)?;
+        let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
         // Add a EV charger meter with one EV charger.
@@ -92,7 +94,7 @@ mod tests {
         assert_eq!(meter_ev_charger_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let formula = graph.ev_charger_formula(None)?;
+        let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
         // Add a battery meter with one inverter and two batteries.
@@ -102,7 +104,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 4);
 
         let graph = builder.build(None)?;
-        let formula = graph.ev_charger_formula(None)?;
+        let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
         // Add a EV charger meter with two EV chargers.
@@ -112,7 +114,7 @@ mod tests {
         assert_eq!(meter_ev_charger_chain.component_id(), 8);
 
         let graph = builder.build(None)?;
-        let formula = graph.ev_charger_formula(None)?;
+        let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -122,8 +124,8 @@ mod tests {
         );
 
         let formula = graph
-            .ev_charger_formula(Some(BTreeSet::from([10, 3])))
-            .unwrap();
+            .ev_charger_formula(Some(BTreeSet::from([10, 3])))?
+            .to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0) + COALESCE(#10, 0.0)");
 
         // add a meter direct to the grid with three EV chargers
@@ -133,7 +135,7 @@ mod tests {
         assert_eq!(meter_ev_charger_chain.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.ev_charger_formula(None)?;
+        let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -148,8 +150,8 @@ mod tests {
         );
 
         let formula = graph
-            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))
-            .unwrap();
+            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))?
+            .to_string();
         assert_eq!(
             formula,
             concat!(
@@ -161,8 +163,8 @@ mod tests {
         );
 
         let formula = graph
-            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))
-            .unwrap();
+            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))?
+            .to_string();
         assert_eq!(
             formula,
             concat!(
@@ -177,8 +179,8 @@ mod tests {
         );
 
         let formula = graph
-            .ev_charger_formula(Some(BTreeSet::from([10, 14])))
-            .unwrap();
+            .ev_charger_formula(Some(BTreeSet::from([10, 14])))?
+            .to_string();
         assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
 
         // Failure cases:

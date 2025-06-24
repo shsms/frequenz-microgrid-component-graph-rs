@@ -5,6 +5,7 @@
 
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::Formula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct ProducerFormulaBuilder<'a, N, E>
@@ -28,7 +29,7 @@ where
     ///
     /// The production formula is the sum of all the PV and CHP components in
     /// the graph.
-    pub fn build(self) -> Result<String, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         let mut expr = None;
         for component_id in self.graph.find_all(
             self.graph.root_id,
@@ -51,8 +52,8 @@ where
             };
         }
         Ok(expr
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "0.0".to_string()))
+            .map(Formula::new)
+            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
     }
 
     /// Returns a formula expression for just the production part of the given
@@ -78,14 +79,14 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(formula, "0.0");
 
         let meter_pv_chain = builder.meter_pv_chain(2);
         builder.connect(grid_meter, meter_pv_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)))"
@@ -96,7 +97,7 @@ mod tests {
         builder.connect(grid, meter_chp_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -110,7 +111,7 @@ mod tests {
         builder.connect(grid, chp);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -125,7 +126,7 @@ mod tests {
         builder.connect(grid_meter, pv_inverter);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -141,7 +142,7 @@ mod tests {
         builder.connect(grid_meter, meter_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -161,7 +162,7 @@ mod tests {
         builder.connect(grid_meter, meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.producer_formula()?;
+        let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
