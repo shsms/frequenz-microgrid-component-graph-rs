@@ -35,6 +35,15 @@ impl CoalesceFormulaBuilder {
     /// Generates a formula that uses the `COALESCE` function to return the first
     /// non-null value from the provided component IDs.
     pub fn build(self) -> Result<String, Error> {
+        if self.component_ids.len() == 1 {
+            if let Some(component_id) = self.component_ids.into_iter().next() {
+                return Ok(Expr::Component { component_id }.to_string());
+            } else {
+                return Err(Error::internal(
+                    "Failed to create expression for single component ID.",
+                ));
+            }
+        }
         let expr = Expr::coalesce(
             self.component_ids
                 .into_iter()
@@ -65,7 +74,7 @@ mod tests {
         let formula = graph.coalesce(BTreeSet::from([1, 2]))?;
         assert_eq!(formula, "COALESCE(#1, #2)");
         let formula = graph.coalesce(BTreeSet::from([1]))?;
-        assert_eq!(formula, "COALESCE(#1)");
+        assert_eq!(formula, "#1");
         let formula = graph.coalesce(BTreeSet::from([]));
         assert_eq!(
             formula,
