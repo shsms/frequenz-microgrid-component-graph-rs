@@ -7,7 +7,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::{graph::formulas::expr::Expr, ComponentGraph, Edge, Error, Node};
+use crate::{
+    graph::formulas::{expr::Expr, Formula},
+    ComponentGraph, Edge, Error, Node,
+};
 
 pub(crate) struct CoalesceFormulaBuilder {
     component_ids: BTreeSet<u64>,
@@ -34,10 +37,10 @@ impl CoalesceFormulaBuilder {
 
     /// Generates a formula that uses the `COALESCE` function to return the first
     /// non-null value from the provided component IDs.
-    pub fn build(self) -> Result<String, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         if self.component_ids.len() == 1 {
             if let Some(component_id) = self.component_ids.into_iter().next() {
-                return Ok(Expr::Component { component_id }.to_string());
+                return Ok(Formula::new(Expr::component(component_id)));
             } else {
                 return Err(Error::internal(
                     "Failed to create expression for single component ID.",
@@ -50,7 +53,7 @@ impl CoalesceFormulaBuilder {
                 .map(|component_id| Expr::Component { component_id })
                 .collect(),
         );
-        Ok(expr.to_string())
+        Ok(Formula::new(expr))
     }
 }
 
@@ -71,14 +74,14 @@ mod tests {
         builder.connect(grid, grid_meter_2);
 
         let graph = builder.build(None)?;
-        let formula = graph.coalesce(BTreeSet::from([1, 2]))?;
+        let formula = graph.coalesce(BTreeSet::from([1, 2]))?.to_string();
         assert_eq!(formula, "COALESCE(#1, #2)");
-        let formula = graph.coalesce(BTreeSet::from([1]))?;
+        let formula = graph.coalesce(BTreeSet::from([1]))?.to_string();
         assert_eq!(formula, "#1");
-        let formula = graph.coalesce(BTreeSet::from([]));
+        let formula = graph.coalesce(BTreeSet::from([])).unwrap_err();
         assert_eq!(
             formula,
-            Err(Error::missing_parameters("No component IDs specified."))
+            Error::missing_parameters("No component IDs specified.")
         );
 
         Ok(())

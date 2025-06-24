@@ -6,7 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::expr::Expr;
-use crate::{component_category::CategoryPredicates, ComponentGraph, Edge, Error, Node};
+use crate::{
+    component_category::CategoryPredicates, graph::formulas::Formula, ComponentGraph, Edge, Error,
+    Node,
+};
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
 where
@@ -35,7 +38,7 @@ where
     }
 
     /// Generates the consumer formula for the given node.
-    pub fn build(mut self) -> Result<String, Error> {
+    pub fn build(mut self) -> Result<Formula, Error> {
         let mut all_meters = None;
         while let Some(meter_id) = self.unvisited_meters.pop_first() {
             let consumption = self.component_consumption(meter_id)?;
@@ -60,9 +63,9 @@ where
         };
 
         match (all_meters, other_grid_successors) {
-            (Some(lhs), Some(rhs)) => Ok((lhs + rhs).to_string()),
-            (None, Some(expr)) | (Some(expr), None) => Ok(expr.to_string()),
-            (None, None) => Ok("0.0".to_string()),
+            (Some(lhs), Some(rhs)) => Ok(Formula::new(lhs + rhs)),
+            (None, Some(expr)) | (Some(expr), None) => Ok(Formula::new(expr)),
+            (None, None) => Ok(Formula::new(Expr::number(0.0))),
         }
     }
 
@@ -138,7 +141,7 @@ mod tests {
         builder.connect(grid, inv_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(formula, "0.0");
 
         Ok(())
@@ -154,7 +157,7 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(0.0, #1)");
 
         // Add a battery meter with one battery inverter and one battery to the
@@ -165,7 +168,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts the battery meter from the grid meter, and the
         // battery inverter from the battery meter.
         assert_eq!(
@@ -180,7 +183,7 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 5);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -212,7 +215,7 @@ mod tests {
         assert_eq!(meter.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -234,7 +237,7 @@ mod tests {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -258,7 +261,7 @@ mod tests {
         assert_eq!(dangling_meter.component_id(), 15);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -297,7 +300,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 1);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts inverter from battery meter, or shows zero
         // consumption if either of the components have no data.
         assert_eq!(formula, "COALESCE(MAX(0.0, #1 - #2), 0.0)");
@@ -315,7 +318,7 @@ mod tests {
         assert_eq!(dangling_meter_2.component_id(), 7);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -334,7 +337,7 @@ mod tests {
         builder.connect(grid, inv_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -358,7 +361,7 @@ mod tests {
         assert_eq!(chp.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -388,7 +391,7 @@ mod tests {
         builder.connect(grid, grid_meter_3);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(0.0, #1) + MAX(0.0, #2) + MAX(0.0, #3)");
 
         // Add two solar inverters with two grid meters as predecessors.
@@ -403,7 +406,7 @@ mod tests {
         assert_eq!(meter_pv_chain_2.component_id(), 6);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -426,7 +429,7 @@ mod tests {
         assert_eq!(meter.component_id(), 8);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
@@ -444,7 +447,7 @@ mod tests {
         builder.connect(grid_meter_1, meter_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.consumer_formula()?;
+        let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
             concat!(
