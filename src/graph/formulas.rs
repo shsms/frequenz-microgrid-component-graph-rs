@@ -12,8 +12,11 @@ use crate::Node;
 
 mod expr;
 mod fallback;
+mod formula;
 mod generators;
 mod traversal;
+
+pub use formula::Formula;
 
 /// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>
