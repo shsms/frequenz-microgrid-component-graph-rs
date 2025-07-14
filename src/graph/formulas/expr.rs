@@ -133,7 +133,11 @@ impl Expr {
     }
 
     pub(crate) fn coalesce(params: Vec<Expr>) -> Self {
-        Self::Coalesce { params }
+        if let [param] = params.as_slice() {
+            param.clone()
+        } else {
+            Self::Coalesce { params }
+        }
     }
 
     pub(crate) fn min(params: Vec<Expr>) -> Self {
