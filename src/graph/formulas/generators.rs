@@ -4,6 +4,7 @@
 //! Formula generators for standard metrics.
 
 pub(super) mod battery;
+pub(super) mod battery_ac_coalesce;
 pub(super) mod chp;
 pub(super) mod consumer;
 pub(super) mod ev_charger;

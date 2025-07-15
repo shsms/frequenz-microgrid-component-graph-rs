@@ -81,4 +81,25 @@ where
     pub fn grid_coalesce_formula(&self) -> Result<Formula, Error> {
         generators::grid_coalesce::GridCoalesceFormulaBuilder::try_new(self)?.build()
     }
+
+    /// Returns the battery AC coalesce formula for the given components.
+    ///
+    /// This formula is used for non-aggregating metrics like AC voltage or
+    /// frequency.
+    ///
+    /// The formula is a `COALESCE` expression that includes all the specified
+    /// battery meters and corresponding inverters.
+    ///
+    /// When the `battery_ids` parameter is `None`, it will include all the
+    /// battery meters and inverters in the graph.
+    pub fn battery_ac_coalesce_formula(
+        &self,
+        battery_ids: Option<BTreeSet<u64>>,
+    ) -> Result<Formula, Error> {
+        generators::battery_ac_coalesce::BatteryAcCoalesceFormulaBuilder::try_new(
+            self,
+            battery_ids,
+        )?
+        .build()
+    }
 }
