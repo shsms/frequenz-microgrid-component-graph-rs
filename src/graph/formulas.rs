@@ -69,4 +69,16 @@ where
     ) -> Result<Formula, Error> {
         generators::ev_charger::EVChargerFormulaBuilder::try_new(self, ev_charger_ids)?.build()
     }
+
+    /// Returns the grid coalesce formula for the graph.
+    ///
+    /// This formula is used for non-aggregating metrics like AC voltage or
+    /// frequency.
+    ///
+    /// The formula is a `COALESCE` expression that includes all meters,
+    /// PV inverters, and battery inverters that are directly connected to the
+    /// grid.
+    pub fn grid_coalesce_formula(&self) -> Result<Formula, Error> {
+        generators::grid_coalesce::GridCoalesceFormulaBuilder::try_new(self)?.build()
+    }
 }
