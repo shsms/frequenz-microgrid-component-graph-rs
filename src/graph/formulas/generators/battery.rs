@@ -59,7 +59,7 @@ where
             .map(Formula::new)
     }
 
-    fn find_inverter_ids(
+    pub(super) fn find_inverter_ids(
         graph: &ComponentGraph<N, E>,
         battery_ids: &BTreeSet<u64>,
     ) -> Result<BTreeSet<u64>, Error> {
