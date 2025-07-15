@@ -56,3 +56,30 @@ impl From<AggregationFormula> for String {
         formula.expr.to_string()
     }
 }
+
+/// Represents a formula that coalesces metrics from multiple components.
+///
+/// This is typically used for non-aggregating metrics like AC voltage or
+/// frequency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoalesceFormula {
+    expr: Expr,
+}
+
+impl CoalesceFormula {
+    pub(crate) fn new(expr: Expr) -> Self {
+        CoalesceFormula { expr }
+    }
+}
+
+impl std::fmt::Display for CoalesceFormula {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.expr.fmt(f)
+    }
+}
+
+impl From<CoalesceFormula> for String {
+    fn from(formula: CoalesceFormula) -> Self {
+        formula.expr.to_string()
+    }
+}
