@@ -16,7 +16,7 @@ mod formula;
 mod generators;
 mod traversal;
 
-pub use formula::AggregationFormula;
+pub use formula::{AggregationFormula, CoalesceFormula};
 
 /// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>
@@ -87,7 +87,7 @@ where
     /// The formula is a `COALESCE` expression that includes all meters,
     /// PV inverters, and battery inverters that are directly connected to the
     /// grid.
-    pub fn grid_coalesce_formula(&self) -> Result<AggregationFormula, Error> {
+    pub fn grid_coalesce_formula(&self) -> Result<CoalesceFormula, Error> {
         generators::grid_coalesce::GridCoalesceFormulaBuilder::try_new(self)?.build()
     }
 
@@ -104,7 +104,7 @@ where
     pub fn battery_ac_coalesce_formula(
         &self,
         battery_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    ) -> Result<CoalesceFormula, Error> {
         generators::battery_ac_coalesce::BatteryAcCoalesceFormulaBuilder::try_new(
             self,
             battery_ids,
@@ -125,7 +125,7 @@ where
     pub fn pv_ac_coalesce_formula(
         &self,
         pv_inverter_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    ) -> Result<CoalesceFormula, Error> {
         generators::pv_ac_coalesce::PVAcCoalesceFormulaBuilder::try_new(self, pv_inverter_ids)?
             .build()
     }

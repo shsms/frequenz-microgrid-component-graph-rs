@@ -7,7 +7,7 @@ use crate::component_category::CategoryPredicates;
 use std::collections::BTreeSet;
 
 use crate::{
-    graph::formulas::{expr::Expr, AggregationFormula},
+    graph::formulas::{expr::Expr, CoalesceFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -55,7 +55,7 @@ where
     ///
     /// When the `pv_inverter_ids` parameter is `None`, it will include all PV
     /// meters and inverters in the graph.
-    pub fn build(self) -> Result<AggregationFormula, Error> {
+    pub fn build(self) -> Result<CoalesceFormula, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
         let mut source_components: Vec<Expr> = vec![];
 
@@ -82,7 +82,7 @@ where
             return Err(Error::component_not_found("No PV inverters found."));
         }
 
-        Ok(AggregationFormula::new(Expr::coalesce(source_components)))
+        Ok(CoalesceFormula::new(Expr::coalesce(source_components)))
     }
 }
 

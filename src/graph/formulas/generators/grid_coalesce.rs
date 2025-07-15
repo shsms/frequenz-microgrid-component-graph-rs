@@ -4,10 +4,8 @@
 //! This module contains the methods for generating grid coalesce formulas.
 
 use crate::component_category::CategoryPredicates;
-use crate::{
-    graph::formulas::{expr::Expr, AggregationFormula},
-    ComponentGraph, Edge, Error, Node,
-};
+use crate::graph::formulas::CoalesceFormula;
+use crate::{graph::formulas::expr::Expr, ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct GridCoalesceFormulaBuilder<'a, N, E>
 where
@@ -34,8 +32,8 @@ where
     /// The formula is a `COALESCE` expression that includes all meters, PV
     /// inverters, and battery inverters that are directly connected to the
     /// grid.
-    pub fn build(self) -> Result<AggregationFormula, Error> {
-        Ok(AggregationFormula::new(Expr::coalesce(
+    pub fn build(self) -> Result<CoalesceFormula, Error> {
+        Ok(CoalesceFormula::new(Expr::coalesce(
             self.graph
                 .successors(self.graph.root_id)?
                 .filter(|node| {
