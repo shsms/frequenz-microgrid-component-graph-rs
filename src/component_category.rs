@@ -96,10 +96,10 @@ impl Display for ComponentCategory {
             ComponentCategory::Unspecified => write!(f, "Unspecified"),
             ComponentCategory::Grid => write!(f, "Grid"),
             ComponentCategory::Meter => write!(f, "Meter"),
-            ComponentCategory::Battery(battery_type) => write!(f, "Battery({})", battery_type),
-            ComponentCategory::Inverter(inverter_type) => write!(f, "{}Inverter", inverter_type),
+            ComponentCategory::Battery(battery_type) => write!(f, "Battery({battery_type})"),
+            ComponentCategory::Inverter(inverter_type) => write!(f, "{inverter_type}Inverter"),
             ComponentCategory::EvCharger(ev_charger_type) => {
-                write!(f, "EVCharger({})", ev_charger_type)
+                write!(f, "EVCharger({ev_charger_type})")
             }
             ComponentCategory::Converter => write!(f, "Converter"),
             ComponentCategory::CryptoMiner => write!(f, "CryptoMiner"),

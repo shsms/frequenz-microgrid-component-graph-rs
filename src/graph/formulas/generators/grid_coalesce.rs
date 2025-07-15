@@ -35,7 +35,7 @@ where
     /// inverters, and battery inverters that are directly connected to the
     /// grid.
     pub fn build(self) -> Result<Formula, Error> {
-        return Ok(Formula::new(Expr::coalesce(
+        Ok(Formula::new(Expr::coalesce(
             self.graph
                 .successors(self.graph.root_id)?
                 .filter(|node| {
@@ -45,7 +45,7 @@ where
                 })
                 .map(|comp| Expr::component(comp.component_id()))
                 .collect(),
-        )));
+        )))
     }
 }
 

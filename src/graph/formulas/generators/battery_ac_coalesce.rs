@@ -79,7 +79,7 @@ where
             return Err(Error::component_not_found("No battery inverters found."));
         }
 
-        return Ok(Formula::new(Expr::coalesce(source_components)));
+        Ok(Formula::new(Expr::coalesce(source_components)))
     }
 }
 

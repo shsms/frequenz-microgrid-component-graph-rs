@@ -67,8 +67,7 @@ where
         for battery_id in battery_ids {
             if !graph.component(*battery_id)?.is_battery() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not a battery.",
-                    battery_id
+                    "Component with id {battery_id} is not a battery."
                 )));
             }
             for sibling in graph.siblings_from_predecessors(*battery_id)? {

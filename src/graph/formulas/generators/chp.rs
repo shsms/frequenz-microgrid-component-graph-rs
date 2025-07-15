@@ -53,8 +53,7 @@ where
         for id in &self.chp_ids {
             if !self.graph.component(*id)?.is_chp() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not a CHP.",
-                    id
+                    "Component with id {id} is not a CHP."
                 )));
             }
         }

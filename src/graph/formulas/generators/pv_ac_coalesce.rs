@@ -62,8 +62,7 @@ where
         for inv_id in &self.pv_inverter_ids {
             if !self.graph.component(*inv_id)?.is_pv_inverter() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not a PV inverter.",
-                    inv_id
+                    "Component with id {inv_id} is not a PV inverter."
                 )));
             }
             for pred in self.graph.predecessors(*inv_id)? {
@@ -83,7 +82,7 @@ where
             return Err(Error::component_not_found("No PV inverters found."));
         }
 
-        return Ok(Formula::new(Expr::coalesce(source_components)));
+        Ok(Formula::new(Expr::coalesce(source_components)))
     }
 }
 

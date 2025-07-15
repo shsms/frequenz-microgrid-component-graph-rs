@@ -40,8 +40,7 @@ where
 
         if !unvisited.is_empty() {
             return Err(Error::invalid_graph(format!(
-                "Nodes {:?} are not connected to the root.",
-                unvisited
+                "Nodes {unvisited:?} are not connected to the root."
             )));
         }
 
@@ -137,8 +136,7 @@ mod tests {
                 .is_err_and(
                     |e| e == Error::invalid_graph("Nodes [11] are not connected to the root.")
                 ),
-            "{:?}",
-            err
+            "{err:?}"
         );
 
         components.push(TestComponent::new(12, ComponentCategory::Meter));

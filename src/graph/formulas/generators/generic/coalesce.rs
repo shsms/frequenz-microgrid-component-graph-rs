@@ -27,8 +27,7 @@ impl CoalesceFormulaBuilder {
         for component_id in &component_ids {
             if graph.component(*component_id).is_err() {
                 return Err(Error::component_not_found(format!(
-                    "Component with ID {} not found in the graph.",
-                    component_id
+                    "Component with ID {component_id} not found in the graph."
                 )));
             }
         }

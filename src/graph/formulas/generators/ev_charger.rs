@@ -56,8 +56,7 @@ where
         for id in &self.ev_charger_ids {
             if !self.graph.component(*id)?.is_ev_charger() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not an EV charger.",
-                    id
+                    "Component with id {id} is not an EV charger."
                 )));
             }
         }

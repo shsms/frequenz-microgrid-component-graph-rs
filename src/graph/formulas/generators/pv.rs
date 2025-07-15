@@ -56,8 +56,7 @@ where
         for id in &self.pv_inverter_ids {
             if !self.graph.component(*id)?.is_pv_inverter() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not a PV inverter.",
-                    id
+                    "Component with id {id} is not a PV inverter."
                 )));
             }
         }

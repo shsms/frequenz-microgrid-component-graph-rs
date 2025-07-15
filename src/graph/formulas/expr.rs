@@ -182,13 +182,13 @@ impl Expr {
             Self::Number { value } => {
                 if value.fract() == 0.0 {
                     // For whole numbers, format with one decimal place.
-                    format!("{:.1}", value)
+                    format!("{value:.1}")
                 } else {
                     // else format normally.
-                    format!("{}", value)
+                    format!("{value}")
                 }
             }
-            Self::Component { component_id } => format!("#{}", component_id),
+            Self::Component { component_id } => format!("#{component_id}"),
             Self::Add { params } => {
                 Self::join_params(params, " + ", None, BracketComponents::None, bracket_whole)
             }
@@ -223,7 +223,7 @@ impl Expr {
         bracket_whole: bool,
     ) -> String {
         let (mut result, suffix) = match prefix {
-            Some(prefix) => (format!("{}(", prefix), String::from(")")),
+            Some(prefix) => (format!("{prefix}("), String::from(")")),
             None => (String::new(), String::new()),
         };
         let mut num_components = 0;

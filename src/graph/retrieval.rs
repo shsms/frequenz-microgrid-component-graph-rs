@@ -19,7 +19,7 @@ where
             .get(&component_id)
             .map(|i| &self.graph[*i])
             .ok_or_else(|| {
-                Error::component_not_found(format!("Component with id {} not found.", component_id))
+                Error::component_not_found(format!("Component with id {component_id} not found."))
             })
     }
 
@@ -52,7 +52,7 @@ where
                     .neighbors_directed(index, petgraph::Direction::Incoming),
             })
             .ok_or_else(|| {
-                Error::component_not_found(format!("Component with id {} not found.", component_id))
+                Error::component_not_found(format!("Component with id {component_id} not found."))
             })
     }
 
@@ -70,7 +70,7 @@ where
                     .neighbors_directed(index, petgraph::Direction::Outgoing),
             })
             .ok_or_else(|| {
-                Error::component_not_found(format!("Component with id {} not found.", component_id))
+                Error::component_not_found(format!("Component with id {component_id} not found."))
             })
     }
 
@@ -120,7 +120,7 @@ where
         follow_after_match: bool,
     ) -> Result<BTreeSet<u64>, Error> {
         let index = self.node_indices.get(&from).ok_or_else(|| {
-            Error::component_not_found(format!("Component with id {} not found.", from))
+            Error::component_not_found(format!("Component with id {from} not found."))
         })?;
         let mut stack = vec![*index];
         let mut found = BTreeSet::new();
