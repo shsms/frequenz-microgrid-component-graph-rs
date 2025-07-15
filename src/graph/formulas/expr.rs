@@ -3,7 +3,7 @@
 
 use crate::Node;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
     /// A negation of an expression.
     Neg { param: Box<Expr> },

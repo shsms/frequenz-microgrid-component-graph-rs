@@ -10,7 +10,7 @@ use super::expr::Expr;
 //
 // `Formula` objects can be added or subtracted from each other, and they can
 // converted to a string representation, before they are passed to an evaluator.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Formula {
     expr: Expr,
 }
