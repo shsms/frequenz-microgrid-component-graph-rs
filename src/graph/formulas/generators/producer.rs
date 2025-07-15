@@ -5,7 +5,7 @@
 
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct ProducerFormulaBuilder<'a, N, E>
@@ -29,7 +29,7 @@ where
     ///
     /// The production formula is the sum of all the PV and CHP components in
     /// the graph.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for component_id in self.graph.find_all(
             self.graph.root_id,
@@ -52,8 +52,8 @@ where
             };
         }
         Ok(expr
-            .map(Formula::new)
-            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
+            .map(AggregationFormula::new)
+            .unwrap_or_else(|| AggregationFormula::new(Expr::number(0.0))))
     }
 
     /// Returns a formula expression for just the production part of the given

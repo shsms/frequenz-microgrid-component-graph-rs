@@ -5,7 +5,7 @@
 
 use crate::component_category::CategoryPredicates;
 use crate::{
-    graph::formulas::{expr::Expr, Formula},
+    graph::formulas::{expr::Expr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -34,8 +34,8 @@ where
     /// The formula is a `COALESCE` expression that includes all meters, PV
     /// inverters, and battery inverters that are directly connected to the
     /// grid.
-    pub fn build(self) -> Result<Formula, Error> {
-        Ok(Formula::new(Expr::coalesce(
+    pub fn build(self) -> Result<AggregationFormula, Error> {
+        Ok(AggregationFormula::new(Expr::coalesce(
             self.graph
                 .successors(self.graph.root_id)?
                 .filter(|node| {

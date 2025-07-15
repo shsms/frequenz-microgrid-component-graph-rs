@@ -4,7 +4,7 @@
 //! This module contains the methods for generating grid formulas.
 
 use crate::{
-    graph::formulas::{expr::Expr, Formula},
+    graph::formulas::{expr::Expr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -30,7 +30,7 @@ where
     /// The grid formula is the sum of all components connected to the grid.
     /// This formula can be used for calculating power or current metrics at the
     /// grid connection point.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
             let comp = self.graph.fallback_expr([comp.component_id()], true)?;
@@ -40,8 +40,8 @@ where
             };
         }
         Ok(expr
-            .map(Formula::new)
-            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
+            .map(AggregationFormula::new)
+            .unwrap_or_else(|| AggregationFormula::new(Expr::number(0.0))))
     }
 }
 

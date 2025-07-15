@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct PVFormulaBuilder<'a, N, E>
@@ -48,9 +48,9 @@ where
     ///
     /// This is the sum of all PV inverters in the graph. If the pv_inverter_ids are provided,
     /// only the PV inverters with the given ids are included in the formula.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         if self.pv_inverter_ids.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
         for id in &self.pv_inverter_ids {
@@ -63,7 +63,7 @@ where
 
         self.graph
             .fallback_expr(self.pv_inverter_ids, false)
-            .map(Formula::new)
+            .map(AggregationFormula::new)
     }
 }
 

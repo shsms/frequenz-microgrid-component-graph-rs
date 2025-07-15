@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    graph::formulas::{expr::Expr, Formula},
+    graph::formulas::{expr::Expr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -36,10 +36,10 @@ impl CoalesceFormulaBuilder {
 
     /// Generates a formula that uses the `COALESCE` function to return the first
     /// non-null value from the provided component IDs.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         if self.component_ids.len() == 1 {
             if let Some(component_id) = self.component_ids.into_iter().next() {
-                return Ok(Formula::new(Expr::component(component_id)));
+                return Ok(AggregationFormula::new(Expr::component(component_id)));
             } else {
                 return Err(Error::internal(
                     "Failed to create expression for single component ID.",
@@ -52,7 +52,7 @@ impl CoalesceFormulaBuilder {
                 .map(|component_id| Expr::Component { component_id })
                 .collect(),
         );
-        Ok(Formula::new(expr))
+        Ok(AggregationFormula::new(expr))
     }
 }
 

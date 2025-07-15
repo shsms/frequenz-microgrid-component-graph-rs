@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct BatteryFormulaBuilder<'a, N, E>
@@ -49,14 +49,14 @@ where
     /// This is the sum of all battery_inverters in the graph. If the
     /// battery_ids are provided, only the batteries with the given ids are
     /// included in the formula.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         if self.inverter_ids.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
         self.graph
             .fallback_expr(self.inverter_ids, false)
-            .map(Formula::new)
+            .map(AggregationFormula::new)
     }
 
     pub(super) fn find_inverter_ids(
