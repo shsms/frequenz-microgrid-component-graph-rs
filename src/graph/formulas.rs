@@ -102,4 +102,22 @@ where
         )?
         .build()
     }
+
+    /// Returns the PV AC coalesce formula for the given components.
+    ///
+    /// This formula is used for non-aggregating metrics like AC voltage or
+    /// frequency.
+    ///
+    /// The formula is a `COALESCE` expression that includes all the specified
+    /// PV meters and corresponding inverters.
+    ///
+    /// When the `pv_inverter_ids` parameter is `None`, it will include all the
+    /// PV meters and inverters in the graph.
+    pub fn pv_ac_coalesce_formula(
+        &self,
+        pv_inverter_ids: Option<BTreeSet<u64>>,
+    ) -> Result<Formula, Error> {
+        generators::pv_ac_coalesce::PVAcCoalesceFormulaBuilder::try_new(self, pv_inverter_ids)?
+            .build()
+    }
 }

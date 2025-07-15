@@ -13,3 +13,4 @@ pub(super) mod grid;
 pub(super) mod grid_coalesce;
 pub(super) mod producer;
 pub(super) mod pv;
+pub(super) mod pv_ac_coalesce;
