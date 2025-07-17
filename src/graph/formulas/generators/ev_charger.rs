@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct EVChargerFormulaBuilder<'a, N, E>
@@ -48,23 +48,22 @@ where
     ///
     /// This is the sum of all EV chargers in the graph. If the ev_charger_ids are provided,
     /// only the EV chargers with the given ids are included in the formula.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         if self.ev_charger_ids.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
         for id in &self.ev_charger_ids {
             if !self.graph.component(*id)?.is_ev_charger() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not an EV charger.",
-                    id
+                    "Component with id {id} is not an EV charger."
                 )));
             }
         }
 
         self.graph
             .fallback_expr(self.ev_charger_ids, false)
-            .map(Formula::new)
+            .map(AggregationFormula::new)
     }
 }
 

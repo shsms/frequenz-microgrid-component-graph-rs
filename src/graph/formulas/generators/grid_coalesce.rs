@@ -1,14 +1,13 @@
 // License: MIT
-// Copyright © 2024 Frequenz Energy-as-a-Service GmbH
+// Copyright © 2025 Frequenz Energy-as-a-Service GmbH
 
-//! This module contains the methods for generating grid formulas.
+//! This module contains the methods for generating grid coalesce formulas.
 
-use crate::{
-    graph::formulas::{expr::Expr, AggregationFormula},
-    ComponentGraph, Edge, Error, Node,
-};
+use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::CoalesceFormula;
+use crate::{graph::formulas::expr::Expr, ComponentGraph, Edge, Error, Node};
 
-pub(crate) struct GridFormulaBuilder<'a, N, E>
+pub(crate) struct GridCoalesceFormulaBuilder<'a, N, E>
 where
     N: Node,
     E: Edge,
@@ -16,7 +15,7 @@ where
     graph: &'a ComponentGraph<N, E>,
 }
 
-impl<'a, N, E> GridFormulaBuilder<'a, N, E>
+impl<'a, N, E> GridCoalesceFormulaBuilder<'a, N, E>
 where
     N: Node,
     E: Edge,
@@ -25,23 +24,26 @@ where
         Ok(Self { graph })
     }
 
-    /// Generates the grid formula for the given node.
+    /// Generates the grid coalesce formula from the component graph.
     ///
-    /// The grid formula is the sum of all components connected to the grid.
-    /// This formula can be used for calculating power or current metrics at the
-    /// grid connection point.
-    pub fn build(self) -> Result<AggregationFormula, Error> {
-        let mut expr = None;
-        for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = self.graph.fallback_expr([comp.component_id()], true)?;
-            expr = match expr {
-                None => Some(comp),
-                Some(e) => Some(comp + e),
-            };
-        }
-        Ok(expr
-            .map(AggregationFormula::new)
-            .unwrap_or_else(|| AggregationFormula::new(Expr::number(0.0))))
+    /// This formula is used for non-aggregating metrics like AC voltage or
+    /// frequency.
+    ///
+    /// The formula is a `COALESCE` expression that includes all meters, PV
+    /// inverters, and battery inverters that are directly connected to the
+    /// grid.
+    pub fn build(self) -> Result<CoalesceFormula, Error> {
+        Ok(CoalesceFormula::new(Expr::coalesce(
+            self.graph
+                .successors(self.graph.root_id)?
+                .filter(|node| {
+                    node.is_meter()
+                        || node.is_pv_inverter()
+                        || node.is_battery_inverter(&self.graph.config)
+                })
+                .map(|comp| Expr::component(comp.component_id()))
+                .collect(),
+        )))
     }
 }
 
@@ -51,7 +53,7 @@ mod tests {
     use crate::graph::test_utils::ComponentGraphBuilder;
 
     #[test]
-    fn test_grid_formula() -> Result<(), Error> {
+    fn test_grid_voltage_formula() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
 
@@ -62,7 +64,7 @@ mod tests {
         builder.connect(grid_meter, meter_bat_chain);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?.to_string();
+        let formula = graph.grid_coalesce_formula()?.to_string();
         assert_eq!(formula, "#1");
 
         // Add an additional dangling meter, and a PV chain and a battery chain
@@ -79,11 +81,8 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 9);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?.to_string();
-        assert_eq!(
-            formula,
-            "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0)"
-        );
+        let formula = graph.grid_coalesce_formula()?.to_string();
+        assert_eq!(formula, "COALESCE(#9, #6, #5, #1)");
 
         // Add a PV inverter to the grid, without a meter.
         let pv_inverter = builder.solar_inverter();
@@ -92,11 +91,8 @@ mod tests {
         assert_eq!(pv_inverter.component_id(), 11);
 
         let graph = builder.build(None)?;
-        let formula = graph.grid_formula()?.to_string();
-        assert_eq!(
-            formula,
-            "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0) + COALESCE(#11, 0.0)"
-        );
+        let formula = graph.grid_coalesce_formula()?.to_string();
+        assert_eq!(formula, "COALESCE(#11, #9, #6, #5, #1)");
 
         Ok(())
     }

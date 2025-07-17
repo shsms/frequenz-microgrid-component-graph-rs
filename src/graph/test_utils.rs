@@ -29,7 +29,7 @@ impl Node for TestComponent {
     }
 
     fn category(&self) -> ComponentCategory {
-        self.1.clone()
+        self.1
     }
 }
 
@@ -78,22 +78,20 @@ pub(super) struct ComponentGraphBuilder {
 impl ComponentGraphBuilder {
     /// Creates a new `ComponentGraphBuilder`.
     pub(super) fn new() -> Self {
-        let builder = ComponentGraphBuilder {
+        ComponentGraphBuilder {
             components: Vec::new(),
             connections: Vec::new(),
             next_id: 0,
-        };
-        builder
+        }
     }
 
     /// Adds a component to the graph and returns its handle.
     pub(super) fn add_component(&mut self, category: ComponentCategory) -> ComponentHandle {
         let id = self.next_id;
         self.next_id += 1;
-        self.components
-            .push(TestComponent::new(id, category.clone()));
-        let handle = ComponentHandle(id);
-        handle
+        self.components.push(TestComponent::new(id, category));
+
+        ComponentHandle(id)
     }
 
     /// Adds a component with the given id to the graph and returns its handle.
@@ -102,10 +100,9 @@ impl ComponentGraphBuilder {
         id: u64,
         category: ComponentCategory,
     ) -> ComponentHandle {
-        self.components
-            .push(TestComponent::new(id, category.clone()));
-        let handle = ComponentHandle(id);
-        handle
+        self.components.push(TestComponent::new(id, category));
+
+        ComponentHandle(id)
     }
 
     /// Pops the last component added to the graph.

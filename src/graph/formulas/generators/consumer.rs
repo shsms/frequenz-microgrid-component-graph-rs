@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::expr::Expr;
 use crate::{
-    component_category::CategoryPredicates, graph::formulas::Formula, ComponentGraph, Edge, Error,
-    Node,
+    component_category::CategoryPredicates, graph::formulas::AggregationFormula, ComponentGraph,
+    Edge, Error, Node,
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -38,7 +38,7 @@ where
     }
 
     /// Generates the consumer formula for the given node.
-    pub fn build(mut self) -> Result<Formula, Error> {
+    pub fn build(mut self) -> Result<AggregationFormula, Error> {
         let mut all_meters = None;
         while let Some(meter_id) = self.unvisited_meters.pop_first() {
             let consumption = self.component_consumption(meter_id)?;
@@ -63,9 +63,9 @@ where
         };
 
         match (all_meters, other_grid_successors) {
-            (Some(lhs), Some(rhs)) => Ok(Formula::new(lhs + rhs)),
-            (None, Some(expr)) | (Some(expr), None) => Ok(Formula::new(expr)),
-            (None, None) => Ok(Formula::new(Expr::number(0.0))),
+            (Some(lhs), Some(rhs)) => Ok(AggregationFormula::new(lhs + rhs)),
+            (None, Some(expr)) | (Some(expr), None) => Ok(AggregationFormula::new(expr)),
+            (None, None) => Ok(AggregationFormula::new(Expr::number(0.0))),
         }
     }
 

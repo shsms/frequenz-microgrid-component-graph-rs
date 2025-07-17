@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct CHPFormulaBuilder<'a, N, E>
@@ -45,23 +45,22 @@ where
     ///
     /// This is the sum of all CHPs in the graph. If the chp_ids are provided,
     /// only the CHPs with the given ids are included in the formula.
-    pub fn build(self) -> Result<Formula, Error> {
+    pub fn build(self) -> Result<AggregationFormula, Error> {
         if self.chp_ids.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
         for id in &self.chp_ids {
             if !self.graph.component(*id)?.is_chp() {
                 return Err(Error::invalid_component(format!(
-                    "Component with id {} is not a CHP.",
-                    id
+                    "Component with id {id} is not a CHP."
                 )));
             }
         }
 
         self.graph
             .fallback_expr(self.chp_ids, false)
-            .map(Formula::new)
+            .map(AggregationFormula::new)
     }
 }
 
