@@ -5,6 +5,9 @@ use crate::Node;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
+    /// An empty expression, which as a formula would evaluate to None.
+    None,
+
     /// A negation of an expression.
     Neg { param: Box<Expr> },
 
@@ -35,6 +38,7 @@ impl std::ops::Add for Expr {
 
     fn add(self, rhs: Self) -> Self {
         match (self, rhs) {
+            (Self::None, other) | (other, Self::None) => other,
             // -a + -b = -(a + b)
             (Self::Neg { param: lhs }, Self::Neg { param: rhs }) => -(*lhs + *rhs),
             // -a + b = b - a
@@ -68,6 +72,8 @@ impl std::ops::Sub for Expr {
 
     fn sub(self, rhs: Self) -> Self {
         match (self, rhs) {
+            (Self::None, other) => -other,
+            (other, Self::None) => other,
             // (a - b) - -c = a - b + c
             (sub @ Self::Sub { .. }, Self::Neg { param }) => sub + *param,
             // -a - (b - c) = c - b - a
@@ -98,6 +104,7 @@ impl std::ops::Neg for Expr {
 
     fn neg(self) -> Self {
         match self {
+            Self::None => Self::None,
             // -(-a) = a
             Expr::Neg { param: inner } => *inner,
             // -(a - b) = b - a
@@ -178,6 +185,7 @@ impl Expr {
     /// component, the whole expression is enclosed in brackets.
     fn generate_string(&self, bracket_whole: bool) -> String {
         match self {
+            Self::None => String::from("None"),
             Self::Neg { param } => format!("-{}", param.generate_string(true)),
             Self::Number { value } => {
                 if value.fract() == 0.0 {
