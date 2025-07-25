@@ -63,14 +63,6 @@ where
         generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
     }
 
-    /// Returns the coalesce formula for the given component IDs.
-    ///
-    /// This formula uses the `COALESCE` function to return the first non-null
-    /// value from the components with the provided IDs.
-    pub fn coalesce(&self, component_ids: BTreeSet<u64>) -> Result<AggregationFormula, Error> {
-        generators::generic::CoalesceFormulaBuilder::try_new(self, component_ids)?.build()
-    }
-
     /// Returns a string representing the EV charger formula for the graph.
     pub fn ev_charger_formula(
         &self,
