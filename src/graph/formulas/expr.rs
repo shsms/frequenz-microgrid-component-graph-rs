@@ -131,14 +131,17 @@ impl<N: Node> From<&N> for Expr {
 
 /// Constructors for `FormulaExpression`.
 impl Expr {
+    #[must_use]
     pub(crate) fn number(value: f64) -> Self {
         Self::Number { value }
     }
 
+    #[must_use]
     pub(crate) fn component(component_id: u64) -> Self {
         Self::Component { component_id }
     }
 
+    #[must_use]
     pub(crate) fn coalesce(self, other: Expr) -> Self {
         match (self, other) {
             (Expr::None, other) | (other, Expr::None) => other,
@@ -179,6 +182,7 @@ impl Expr {
         }
     }
 
+    #[must_use]
     pub(crate) fn min(self, other: Expr) -> Self {
         match (self, other) {
             (Expr::None, expr) | (expr, Expr::None) => expr,
@@ -207,6 +211,7 @@ impl Expr {
         }
     }
 
+    #[must_use]
     pub(crate) fn max(self, other: Expr) -> Self {
         match (self, other) {
             (Expr::None, expr) | (expr, Expr::None) => expr,
