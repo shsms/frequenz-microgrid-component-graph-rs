@@ -74,7 +74,7 @@ where
     ///
     /// This is done by clamping the expression to a maximum of 0.0.
     fn max_zero(expr: Expr) -> Expr {
-        Expr::max(vec![Expr::number(0.0), expr])
+        Expr::max(Expr::number(0.0), expr)
     }
 
     fn component_consumption(&mut self, component_id: u64) -> Result<Expr, Error> {

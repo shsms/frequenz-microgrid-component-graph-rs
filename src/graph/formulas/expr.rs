@@ -179,12 +179,60 @@ impl Expr {
         }
     }
 
-    pub(crate) fn min(params: Vec<Expr>) -> Self {
-        Self::Min { params }
+    pub(crate) fn min(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, expr) | (expr, Expr::None) => expr,
+            (
+                Expr::Min { mut params },
+                Expr::Min {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are min expressions, merge them.
+                params.extend(other_params.into_iter());
+                return Self::Min { params };
+            }
+            (Expr::Min { mut params }, other) | (other, Expr::Min { mut params }) => {
+                // If one parameter is a min expression, add the other parameter
+                // to it.
+                params.push(other);
+                return Self::Min { params };
+            }
+            (first, second) => {
+                // If neither parameter is a min expression, create a new one.
+                return Self::Min {
+                    params: vec![first, second],
+                };
+            }
+        }
     }
 
-    pub(crate) fn max(params: Vec<Expr>) -> Self {
-        Self::Max { params }
+    pub(crate) fn max(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, expr) | (expr, Expr::None) => expr,
+            (
+                Expr::Max { mut params },
+                Expr::Max {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are max expressions, merge them.
+                params.extend(other_params.into_iter());
+                return Self::Max { params };
+            }
+            (Expr::Max { mut params }, other) | (other, Expr::Max { mut params }) => {
+                // If one parameter is a max expression, add the other parameter
+                // to it.
+                params.push(other);
+                return Self::Max { params };
+            }
+            (first, second) => {
+                // If neither parameter is a max expression, create a new one.
+                return Self::Max {
+                    params: vec![first, second],
+                };
+            }
+        }
     }
 }
 
@@ -405,15 +453,13 @@ mod tests {
         let comp = Expr::component;
         let coalesce = Expr::coalesce;
         let number = Expr::number;
-        let min = Expr::min;
-        let max = Expr::max;
 
         assert_expr(
             &[
                 comp(1) - (coalesce(comp(5), comp(7) + comp(6)) + coalesce(comp(2), comp(3)))
                     + coalesce(
-                        max(vec![number(0.0), comp(5)]),
-                        max(vec![number(0.0), comp(7)]) + max(vec![number(0.0), comp(6)]),
+                        number(0.0).max(comp(5)),
+                        number(0.0).max(comp(7)) + number(0.0).max(comp(6)),
                     ),
             ],
             concat!(
@@ -423,12 +469,10 @@ mod tests {
         );
 
         assert_expr(
-            &[min(vec![number(0.0), comp(5), comp(7) + comp(6)])
-                - max(vec![
-                    coalesce(comp(5), comp(7) + comp(6)),
-                    comp(7),
-                    number(22.44),
-                ])],
+            &[number(0.0).min(comp(5)).min(comp(7) + comp(6))
+                - coalesce(comp(5), comp(7) + comp(6))
+                    .max(comp(7))
+                    .max(number(22.44))],
             "MIN(0.0, #5, #7 + #6) - MAX(COALESCE(#5, #7 + #6), #7, 22.44)",
         )
     }

@@ -61,7 +61,7 @@ where
     ///
     /// This is done by clamping the expression to a minimum of 0.0.
     fn min_zero(expr: Expr) -> Expr {
-        Expr::min(vec![Expr::number(0.0), expr])
+        Expr::min(Expr::number(0.0), expr)
     }
 }
 
