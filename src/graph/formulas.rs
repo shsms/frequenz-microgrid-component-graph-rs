@@ -16,7 +16,7 @@ mod formula;
 mod generators;
 mod traversal;
 
-pub use formula::{AggregationFormula, CoalesceFormula};
+pub use formula::{AggregationFormula, CoalesceFormula, Formula};
 
 /// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>

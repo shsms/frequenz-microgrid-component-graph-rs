@@ -13,7 +13,7 @@ mod formulas;
 pub mod iterators;
 
 use crate::{ComponentGraphConfig, Edge, Node};
-pub use formulas::{AggregationFormula, CoalesceFormula};
+pub use formulas::{AggregationFormula, CoalesceFormula, Formula};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
