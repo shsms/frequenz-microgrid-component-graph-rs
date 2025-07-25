@@ -69,14 +69,6 @@ where
         }
     }
 
-    /// Returns a formula expression for just the consumption part of the given
-    /// component as a formula expression.
-    ///
-    /// This is done by clamping the expression to a maximum of 0.0.
-    fn max_zero(expr: Expr) -> Expr {
-        Expr::max(Expr::number(0.0), expr)
-    }
-
     fn component_consumption(&mut self, component_id: u64) -> Result<Expr, Error> {
         let component = self.graph.component(component_id)?;
         if component.is_meter() {
@@ -110,7 +102,7 @@ where
                 expr = expr - successor_expr;
             }
 
-            expr = Self::max_zero(expr);
+            expr = expr.max(Expr::number(0.0));
 
             // If the meter doesn't have any meter successors, its consumption
             // can be 0 when it can't be calculated.
@@ -121,7 +113,7 @@ where
             }
             Ok(expr)
         } else {
-            Ok(Self::max_zero(component.into()))
+            Ok(Expr::from(component).max(Expr::number(0.0)))
         }
     }
 }
@@ -158,7 +150,7 @@ mod tests {
 
         let graph = builder.build(None)?;
         let formula = graph.consumer_formula()?.to_string();
-        assert_eq!(formula, "MAX(0.0, #1)");
+        assert_eq!(formula, "MAX(#1, 0.0)");
 
         // Add a battery meter with one battery inverter and one battery to the
         // grid meter.
@@ -173,7 +165,7 @@ mod tests {
         // battery inverter from the battery meter.
         assert_eq!(
             formula,
-            "MAX(0.0, #1 - COALESCE(#2, #3, 0.0)) + COALESCE(MAX(0.0, #2 - #3), 0.0)"
+            "MAX(#1 - COALESCE(#2, #3, 0.0), 0.0) + COALESCE(MAX(#2 - #3, 0.0), 0.0)"
         );
 
         // Add a solar meter with two solar inverters to the grid meter.
@@ -189,12 +181,12 @@ mod tests {
             concat!(
                 // difference of grid meter from all its suceessors
                 "MAX(",
-                "0.0, ",
-                "#1 - COALESCE(#2, #3, 0.0) - COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0))",
+                "#1 - COALESCE(#2, #3, 0.0) - COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)), ",
+                "0.0",
                 ") + ",
                 // difference of battery meter from battery inverter and pv
                 // meter from the two pv inverters.
-                "COALESCE(MAX(0.0, #2 - #3), 0.0) + COALESCE(MAX(0.0, #5 - #6 - #7), 0.0)",
+                "COALESCE(MAX(#2 - #3, 0.0), 0.0) + COALESCE(MAX(#5 - #6 - #7, 0.0), 0.0)",
             )
         );
 
@@ -220,17 +212,17 @@ mod tests {
             formula,
             concat!(
                 // difference of grid meter from all its suceessors
-                "MAX(0.0, ",
+                "MAX(",
                 "#1 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
-                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0))",
-                ") + ",
+                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)), ",
+                "0.0) + ",
                 // difference of battery meter from battery inverter and pv
                 // meter from the two pv inverters.
-                "COALESCE(MAX(0.0, #2 - #3), 0.0) + COALESCE(MAX(0.0, #5 - #6 - #7), 0.0) + ",
+                "COALESCE(MAX(#2 - #3, 0.0), 0.0) + COALESCE(MAX(#5 - #6 - #7, 0.0), 0.0) + ",
                 // difference of "mixed" meter from its successors.
-                "COALESCE(MAX(0.0, #11 - #8 - #9 - #10), 0.0)"
+                "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0)"
             )
         );
         let graph = builder.build(Some(ComponentGraphConfig {
@@ -242,12 +234,12 @@ mod tests {
             formula,
             concat!(
                 // difference of grid meter from all its suceessors (without fallbacks)
-                "MAX(0.0, #1 - #2 - #5 - #11) + ",
+                "MAX(#1 - #2 - #5 - #11, 0.0) + ",
                 // difference of battery meter from battery inverter and pv
                 // meter from the two pv inverters.
-                "COALESCE(MAX(0.0, #2 - #3), 0.0) + COALESCE(MAX(0.0, #5 - #6 - #7), 0.0) + ",
+                "COALESCE(MAX(#2 - #3, 0.0), 0.0) + COALESCE(MAX(#5 - #6 - #7, 0.0), 0.0) + ",
                 // difference of "mixed" meter from its successors.
-                "COALESCE(MAX(0.0, #11 - #8 - #9 - #10), 0.0)"
+                "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0)"
             )
         );
 
@@ -266,22 +258,22 @@ mod tests {
             formula,
             concat!(
                 // difference of grid meter from all its suceessors
-                "MAX(0.0, ",
+                "MAX(",
                 "#1 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
                 "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)) - ",
-                "COALESCE(#12, #13, 0.0)",
-                ") + ",
+                "COALESCE(#12, #13, 0.0), ",
+                "0.0) + ",
                 // difference of battery meter from battery inverter and pv
                 // meter from the two pv inverters.
-                "COALESCE(MAX(0.0, #2 - #3), 0.0) + COALESCE(MAX(0.0, #5 - #6 - #7), 0.0) + ",
+                "COALESCE(MAX(#2 - #3, 0.0), 0.0) + COALESCE(MAX(#5 - #6 - #7, 0.0), 0.0) + ",
                 // difference of "mixed" meter from its successors.
-                "COALESCE(MAX(0.0, #11 - #8 - #9 - #10), 0.0) + ",
+                "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0) + ",
                 // difference of second battery meter from inverter.
-                "COALESCE(MAX(0.0, #12 - #13), 0.0) + ",
+                "COALESCE(MAX(#12 - #13, 0.0), 0.0) + ",
                 // consumption component of the dangling meter.
-                "MAX(0.0, #15)"
+                "MAX(#15, 0.0)"
             )
         );
 
@@ -303,7 +295,7 @@ mod tests {
         let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts inverter from battery meter, or shows zero
         // consumption if either of the components have no data.
-        assert_eq!(formula, "COALESCE(MAX(0.0, #1 - #2), 0.0)");
+        assert_eq!(formula, "COALESCE(MAX(#1 - #2, 0.0), 0.0)");
 
         // Add a pv meter with one solar inverter and two dangling meter.
         let meter_pv_chain = builder.meter_pv_chain(1);
@@ -323,9 +315,9 @@ mod tests {
             formula,
             concat!(
                 // subtract meter successors from meters
-                "COALESCE(MAX(0.0, #1 - #2), 0.0) + COALESCE(MAX(0.0, #4 - #5), 0.0) + ",
+                "COALESCE(MAX(#1 - #2, 0.0), 0.0) + COALESCE(MAX(#4 - #5, 0.0), 0.0) + ",
                 // dangling meters
-                "MAX(0.0, #6) + MAX(0.0, #7)"
+                "MAX(#6, 0.0) + MAX(#7, 0.0)"
             )
         );
 
@@ -342,9 +334,9 @@ mod tests {
             formula,
             concat!(
                 // subtract meter successors from meters
-                "COALESCE(MAX(0.0, #1 - #2), 0.0) + COALESCE(MAX(0.0, #4 - #5), 0.0) + ",
+                "COALESCE(MAX(#1 - #2, 0.0), 0.0) + COALESCE(MAX(#4 - #5, 0.0), 0.0) + ",
                 // dangling meters
-                "MAX(0.0, #6) + MAX(0.0, #7)"
+                "MAX(#6, 0.0) + MAX(#7, 0.0)"
             )
         );
 
@@ -366,11 +358,11 @@ mod tests {
             formula,
             concat!(
                 // subtract meter successors from meters
-                "COALESCE(MAX(0.0, #1 - #2), 0.0) + COALESCE(MAX(0.0, #4 - #5), 0.0) + ",
+                "COALESCE(MAX(#1 - #2, 0.0), 0.0) + COALESCE(MAX(#4 - #5, 0.0), 0.0) + ",
                 // dangling meters
-                "MAX(0.0, #6) + MAX(0.0, #7) + ",
+                "MAX(#6, 0.0) + MAX(#7, 0.0) + ",
                 // PV inverter and CHP
-                "MAX(0.0, #11) + MAX(0.0, #10)",
+                "MAX(#11, 0.0) + MAX(#10, 0.0)",
             )
         );
 
@@ -392,7 +384,7 @@ mod tests {
 
         let graph = builder.build(None)?;
         let formula = graph.consumer_formula()?.to_string();
-        assert_eq!(formula, "MAX(0.0, #1) + MAX(0.0, #2) + MAX(0.0, #3)");
+        assert_eq!(formula, "MAX(#1, 0.0) + MAX(#2, 0.0) + MAX(#3, 0.0)");
 
         // Add two solar inverters with two grid meters as predecessors.
         let meter_pv_chain_1 = builder.meter_pv_chain(1);
@@ -411,11 +403,11 @@ mod tests {
             formula,
             concat!(
                 // difference of pv powers from first two grid meters
-                "MAX(0.0, #1 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0)) + ",
+                "MAX(#1 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0), 0.0) + ",
                 // third grid meter still dangling
-                "MAX(0.0, #3) + ",
+                "MAX(#3, 0.0) + ",
                 // difference of solar inverters from their meters
-                "COALESCE(MAX(0.0, #4 - #5), 0.0) + COALESCE(MAX(0.0, #6 - #7), 0.0)"
+                "COALESCE(MAX(#4 - #5, 0.0), 0.0) + COALESCE(MAX(#6 - #7, 0.0), 0.0)"
             )
         );
 
@@ -434,11 +426,11 @@ mod tests {
             formula,
             concat!(
                 // difference of pv powers from first two grid meters and meter#8
-                "MAX(0.0, #1 + #8 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0)) + ",
+                "MAX(#1 + #8 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0), 0.0) + ",
                 // difference of meter#8 from third grid meter
-                "MAX(0.0, #3 - #8) + ",
+                "MAX(#3 - #8, 0.0) + ",
                 // difference of solar inverters from their meters
-                "COALESCE(MAX(0.0, #4 - #5), 0.0) + COALESCE(MAX(0.0, #6 - #7), 0.0)"
+                "COALESCE(MAX(#4 - #5, 0.0), 0.0) + COALESCE(MAX(#6 - #7, 0.0), 0.0)"
             )
         );
 
@@ -453,15 +445,15 @@ mod tests {
             concat!(
                 // difference of pv and battery powers from first two grid
                 // meters and meter#8
-                "MAX(0.0, ",
-                "#1 + #8 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0) - COALESCE(#9, #10, 0.0)",
-                ") + ",
+                "MAX(",
+                "#1 + #8 + #2 - COALESCE(#4, #5, 0.0) - COALESCE(#6, #7, 0.0) - COALESCE(#9, #10, 0.0), ",
+                "0.0) + ",
                 // difference of meter#8 from third grid meter
-                "MAX(0.0, #3 - #8) + ",
+                "MAX(#3 - #8, 0.0) + ",
                 // difference of solar inverters from their meters
-                "COALESCE(MAX(0.0, #4 - #5), 0.0) + COALESCE(MAX(0.0, #6 - #7), 0.0) + ",
+                "COALESCE(MAX(#4 - #5, 0.0), 0.0) + COALESCE(MAX(#6 - #7, 0.0), 0.0) + ",
                 // difference of battery inverter from battery meter
-                "COALESCE(MAX(0.0, #9 - #10), 0.0)"
+                "COALESCE(MAX(#9 - #10, 0.0), 0.0)"
             )
         );
 
