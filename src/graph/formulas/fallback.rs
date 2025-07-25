@@ -81,7 +81,7 @@ where
             .map(|node| {
                 (
                     Expr::from(node),
-                    Expr::coalesce(vec![Expr::from(node), Expr::number(0.0)]),
+                    Expr::coalesce(Expr::from(node), Expr::number(0.0)),
                 )
             })
             .reduce(|a, b| (a.0 + b.0, a.1 + b.1))
@@ -91,27 +91,26 @@ where
 
         let has_multiple_successors = matches!(sum_of_successors, Expr::Add { .. });
 
-        let mut to_be_coalesced: Vec<Expr> = vec![];
+        let mut coalesced = Expr::component(component_id);
 
         if !self.prefer_meters {
-            to_be_coalesced.push(sum_of_successors.clone());
+            coalesced = sum_of_successors.clone().coalesce(coalesced);
         }
-        to_be_coalesced.push(Expr::component(component_id));
 
         if self.prefer_meters {
             if has_multiple_successors {
-                to_be_coalesced.push(sum_of_coalesced_successors);
+                coalesced = coalesced.coalesce(sum_of_coalesced_successors);
             } else {
-                to_be_coalesced.push(sum_of_successors);
-                to_be_coalesced.push(Expr::number(0.0));
+                coalesced = coalesced.coalesce(sum_of_successors);
+                coalesced = coalesced.coalesce(Expr::number(0.0));
             }
         } else if has_multiple_successors {
-            to_be_coalesced.push(sum_of_coalesced_successors);
+            coalesced = coalesced.coalesce(sum_of_coalesced_successors);
         } else {
-            to_be_coalesced.push(Expr::number(0.0));
+            coalesced = coalesced.coalesce(Expr::number(0.0));
         }
 
-        Ok(Some(Expr::coalesce(to_be_coalesced)))
+        Ok(Some(coalesced))
     }
 
     /// Returns a fallback expression for components with the following categories:
@@ -145,10 +144,10 @@ where
             .iter()
             .all(|sibling| component_ids.contains(&sibling.component_id()))
         {
-            return Ok(Some(Expr::coalesce(vec![
+            return Ok(Some(Expr::coalesce(
                 Expr::component(component_id),
                 Expr::number(0.0),
-            ])));
+            )));
         }
 
         for sibling in siblings {

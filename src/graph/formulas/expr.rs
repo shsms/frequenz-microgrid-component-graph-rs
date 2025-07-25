@@ -139,11 +139,43 @@ impl Expr {
         Self::Component { component_id }
     }
 
-    pub(crate) fn coalesce(params: Vec<Expr>) -> Self {
-        if let [param] = params.as_slice() {
-            param.clone()
-        } else {
-            Self::Coalesce { params }
+    pub(crate) fn coalesce(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, other) | (other, Expr::None) => other,
+            (
+                Expr::Coalesce { mut params },
+                Expr::Coalesce {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are coalesce expressions, merge them.
+                params.extend(other_params.into_iter());
+                return Self::Coalesce { params };
+            }
+            (Expr::Coalesce { mut params }, other) => {
+                // If the first parameter is a coalesce expression, add the second
+                // parameter to it.
+                params.push(other);
+                return Self::Coalesce { params };
+            }
+            (
+                param,
+                Expr::Coalesce {
+                    params: other_params,
+                },
+            ) => {
+                // If the second parameter is a coalesce expression, add the first
+                // parameter to it.
+                let mut params = vec![param];
+                params.extend(other_params.into_iter());
+                return Self::Coalesce { params };
+            }
+            (first, second) => {
+                // If neither parameter is a coalesce expression, create a new one.
+                return Self::Coalesce {
+                    params: vec![first, second],
+                };
+            }
         }
     }
 
@@ -377,12 +409,13 @@ mod tests {
         let max = Expr::max;
 
         assert_expr(
-            &[comp(1)
-                - (coalesce(vec![comp(5), comp(7) + comp(6)]) + coalesce(vec![comp(2), comp(3)]))
-                + coalesce(vec![
-                    max(vec![number(0.0), comp(5)]),
-                    max(vec![number(0.0), comp(7)]) + max(vec![number(0.0), comp(6)]),
-                ])],
+            &[
+                comp(1) - (coalesce(comp(5), comp(7) + comp(6)) + coalesce(comp(2), comp(3)))
+                    + coalesce(
+                        max(vec![number(0.0), comp(5)]),
+                        max(vec![number(0.0), comp(7)]) + max(vec![number(0.0), comp(6)]),
+                    ),
+            ],
             concat!(
                 "#1 - (COALESCE(#5, #7 + #6) + COALESCE(#2, #3)) + ",
                 "COALESCE(MAX(0.0, #5), MAX(0.0, #7) + MAX(0.0, #6))"
@@ -392,7 +425,7 @@ mod tests {
         assert_expr(
             &[min(vec![number(0.0), comp(5), comp(7) + comp(6)])
                 - max(vec![
-                    coalesce(vec![comp(5), comp(7) + comp(6)]),
+                    coalesce(comp(5), comp(7) + comp(6)),
                     comp(7),
                     number(22.44),
                 ])],

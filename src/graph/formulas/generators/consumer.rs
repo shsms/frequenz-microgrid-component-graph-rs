@@ -117,7 +117,7 @@ where
             if self.graph.has_successors(component_id)?
                 && !self.graph.has_meter_successors(component_id)?
             {
-                expr = Expr::coalesce(vec![expr, Expr::number(0.0)]);
+                expr = expr.coalesce(Expr::number(0.0));
             }
             Ok(expr)
         } else {

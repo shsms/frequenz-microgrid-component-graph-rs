@@ -46,12 +46,13 @@ impl CoalesceFormulaBuilder {
                 ));
             }
         }
-        let expr = Expr::coalesce(
-            self.component_ids
-                .into_iter()
-                .map(|component_id| Expr::Component { component_id })
-                .collect(),
-        );
+        let expr = self
+            .component_ids
+            .into_iter()
+            .fold(Expr::None, |expr, component_id| {
+                expr.coalesce(Expr::component(component_id))
+            });
+
         Ok(AggregationFormula::new(expr))
     }
 }
