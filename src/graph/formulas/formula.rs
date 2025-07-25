@@ -19,6 +19,18 @@ pub struct AggregationFormula {
     expr: Expr,
 }
 
+impl From<Expr> for AggregationFormula {
+    fn from(expr: Expr) -> Self {
+        AggregationFormula { expr }
+    }
+}
+
+impl From<AggregationFormula> for Expr {
+    fn from(formula: AggregationFormula) -> Self {
+        formula.expr
+    }
+}
+
 impl AggregationFormula {
     pub(crate) fn new(expr: Expr) -> Self {
         AggregationFormula { expr }
@@ -64,6 +76,18 @@ impl From<AggregationFormula> for String {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoalesceFormula {
     expr: Expr,
+}
+
+impl From<Expr> for CoalesceFormula {
+    fn from(expr: Expr) -> Self {
+        CoalesceFormula { expr }
+    }
+}
+
+impl From<CoalesceFormula> for Expr {
+    fn from(formula: CoalesceFormula) -> Self {
+        formula.expr
+    }
 }
 
 impl CoalesceFormula {
