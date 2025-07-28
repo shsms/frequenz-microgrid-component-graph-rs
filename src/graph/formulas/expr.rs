@@ -5,6 +5,9 @@ use crate::Node;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
+    /// An empty expression, which as a formula would evaluate to None.
+    None,
+
     /// A negation of an expression.
     Neg { param: Box<Expr> },
 
@@ -35,6 +38,7 @@ impl std::ops::Add for Expr {
 
     fn add(self, rhs: Self) -> Self {
         match (self, rhs) {
+            (Self::None, other) | (other, Self::None) => other,
             // -a + -b = -(a + b)
             (Self::Neg { param: lhs }, Self::Neg { param: rhs }) => -(*lhs + *rhs),
             // -a + b = b - a
@@ -68,6 +72,8 @@ impl std::ops::Sub for Expr {
 
     fn sub(self, rhs: Self) -> Self {
         match (self, rhs) {
+            (Self::None, other) => -other,
+            (other, Self::None) => other,
             // (a - b) - -c = a - b + c
             (sub @ Self::Sub { .. }, Self::Neg { param }) => sub + *param,
             // -a - (b - c) = c - b - a
@@ -98,6 +104,7 @@ impl std::ops::Neg for Expr {
 
     fn neg(self) -> Self {
         match self {
+            Self::None => Self::None,
             // -(-a) = a
             Expr::Neg { param: inner } => *inner,
             // -(a - b) = b - a
@@ -124,28 +131,113 @@ impl<N: Node> From<&N> for Expr {
 
 /// Constructors for `FormulaExpression`.
 impl Expr {
+    #[must_use]
     pub(crate) fn number(value: f64) -> Self {
         Self::Number { value }
     }
 
+    #[must_use]
     pub(crate) fn component(component_id: u64) -> Self {
         Self::Component { component_id }
     }
 
-    pub(crate) fn coalesce(params: Vec<Expr>) -> Self {
-        if let [param] = params.as_slice() {
-            param.clone()
-        } else {
-            Self::Coalesce { params }
+    #[must_use]
+    pub(crate) fn coalesce(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, other) | (other, Expr::None) => other,
+            (
+                Expr::Coalesce { mut params },
+                Expr::Coalesce {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are coalesce expressions, merge them.
+                params.extend(other_params);
+                Self::Coalesce { params }
+            }
+            (Expr::Coalesce { mut params }, other) => {
+                // If the first parameter is a coalesce expression, add the second
+                // parameter to it.
+                params.push(other);
+                Self::Coalesce { params }
+            }
+            (
+                param,
+                Expr::Coalesce {
+                    params: other_params,
+                },
+            ) => {
+                // If the second parameter is a coalesce expression, add the first
+                // parameter to it.
+                let mut params = vec![param];
+                params.extend(other_params);
+                Self::Coalesce { params }
+            }
+            (first, second) => {
+                // If neither parameter is a coalesce expression, create a new one.
+                Self::Coalesce {
+                    params: vec![first, second],
+                }
+            }
         }
     }
 
-    pub(crate) fn min(params: Vec<Expr>) -> Self {
-        Self::Min { params }
+    #[must_use]
+    pub(crate) fn min(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, expr) | (expr, Expr::None) => expr,
+            (
+                Expr::Min { mut params },
+                Expr::Min {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are min expressions, merge them.
+                params.extend(other_params);
+                Self::Min { params }
+            }
+            (Expr::Min { mut params }, other) | (other, Expr::Min { mut params }) => {
+                // If one parameter is a min expression, add the other parameter
+                // to it.
+                params.push(other);
+                Self::Min { params }
+            }
+            (first, second) => {
+                // If neither parameter is a min expression, create a new one.
+                Self::Min {
+                    params: vec![first, second],
+                }
+            }
+        }
     }
 
-    pub(crate) fn max(params: Vec<Expr>) -> Self {
-        Self::Max { params }
+    #[must_use]
+    pub(crate) fn max(self, other: Expr) -> Self {
+        match (self, other) {
+            (Expr::None, expr) | (expr, Expr::None) => expr,
+            (
+                Expr::Max { mut params },
+                Expr::Max {
+                    params: other_params,
+                },
+            ) => {
+                // If both parameters are max expressions, merge them.
+                params.extend(other_params);
+                Self::Max { params }
+            }
+            (Expr::Max { mut params }, other) | (other, Expr::Max { mut params }) => {
+                // If one parameter is a max expression, add the other parameter
+                // to it.
+                params.push(other);
+                Self::Max { params }
+            }
+            (first, second) => {
+                // If neither parameter is a max expression, create a new one.
+                Self::Max {
+                    params: vec![first, second],
+                }
+            }
+        }
     }
 }
 
@@ -178,6 +270,7 @@ impl Expr {
     /// component, the whole expression is enclosed in brackets.
     fn generate_string(&self, bracket_whole: bool) -> String {
         match self {
+            Self::None => String::from("None"),
             Self::Neg { param } => format!("-{}", param.generate_string(true)),
             Self::Number { value } => {
                 if value.fract() == 0.0 {
@@ -365,16 +458,15 @@ mod tests {
         let comp = Expr::component;
         let coalesce = Expr::coalesce;
         let number = Expr::number;
-        let min = Expr::min;
-        let max = Expr::max;
 
         assert_expr(
-            &[comp(1)
-                - (coalesce(vec![comp(5), comp(7) + comp(6)]) + coalesce(vec![comp(2), comp(3)]))
-                + coalesce(vec![
-                    max(vec![number(0.0), comp(5)]),
-                    max(vec![number(0.0), comp(7)]) + max(vec![number(0.0), comp(6)]),
-                ])],
+            &[
+                comp(1) - (coalesce(comp(5), comp(7) + comp(6)) + coalesce(comp(2), comp(3)))
+                    + coalesce(
+                        number(0.0).max(comp(5)),
+                        number(0.0).max(comp(7)) + number(0.0).max(comp(6)),
+                    ),
+            ],
             concat!(
                 "#1 - (COALESCE(#5, #7 + #6) + COALESCE(#2, #3)) + ",
                 "COALESCE(MAX(0.0, #5), MAX(0.0, #7) + MAX(0.0, #6))"
@@ -382,12 +474,10 @@ mod tests {
         );
 
         assert_expr(
-            &[min(vec![number(0.0), comp(5), comp(7) + comp(6)])
-                - max(vec![
-                    coalesce(vec![comp(5), comp(7) + comp(6)]),
-                    comp(7),
-                    number(22.44),
-                ])],
+            &[number(0.0).min(comp(5)).min(comp(7) + comp(6))
+                - coalesce(comp(5), comp(7) + comp(6))
+                    .max(comp(7))
+                    .max(number(22.44))],
             "MIN(0.0, #5, #7 + #6) - MAX(COALESCE(#5, #7 + #6), #7, 22.44)",
         )
     }

@@ -45,7 +45,10 @@ where
             petgraph::Direction::Outgoing,
             false,
         )? {
-            let comp_expr = Self::min_zero(self.graph.fallback_expr([component_id], false)?);
+            let comp_expr = self
+                .graph
+                .fallback_expr([component_id], false)?
+                .min(Expr::number(0.0));
             expr = match expr {
                 None => Some(comp_expr),
                 Some(e) => Some(e + comp_expr),
@@ -54,14 +57,6 @@ where
         Ok(expr
             .map(AggregationFormula::new)
             .unwrap_or_else(|| AggregationFormula::new(Expr::number(0.0))))
-    }
-
-    /// Returns a formula expression for just the production part of the given
-    /// component as a formula expression.
-    ///
-    /// This is done by clamping the expression to a minimum of 0.0.
-    fn min_zero(expr: Expr) -> Expr {
-        Expr::min(vec![Expr::number(0.0), expr])
     }
 }
 
@@ -89,7 +84,7 @@ mod tests {
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
-            "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)))"
+            "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0)"
         );
 
         // Add a CHP meter to the grid with a CHP behind it.
@@ -101,8 +96,8 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
-                "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))) + ",
-                "MIN(0.0, COALESCE(#6, #5, 0.0))"
+                "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0) + ",
+                "MIN(COALESCE(#6, #5, 0.0), 0.0)"
             )
         );
 
@@ -115,9 +110,9 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
-                "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))) + ",
-                "MIN(0.0, COALESCE(#6, #5, 0.0)) + ",
-                "MIN(0.0, COALESCE(#7, 0.0))"
+                "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0) + ",
+                "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
+                "MIN(COALESCE(#7, 0.0), 0.0)"
             )
         );
 
@@ -130,10 +125,10 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
-                "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))) + ",
-                "MIN(0.0, COALESCE(#6, #5, 0.0)) + ",
-                "MIN(0.0, COALESCE(#7, 0.0)) + ",
-                "MIN(0.0, COALESCE(#8, 0.0))"
+                "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0) + ",
+                "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
+                "MIN(COALESCE(#7, 0.0), 0.0) + ",
+                "MIN(COALESCE(#8, 0.0), 0.0)"
             )
         );
 
@@ -146,10 +141,10 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
-                "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))) + ",
-                "MIN(0.0, COALESCE(#6, #5, 0.0)) + ",
-                "MIN(0.0, COALESCE(#7, 0.0)) + ",
-                "MIN(0.0, COALESCE(#8, 0.0))"
+                "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0) + ",
+                "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
+                "MIN(COALESCE(#7, 0.0), 0.0) + ",
+                "MIN(COALESCE(#8, 0.0), 0.0)"
             )
         );
 
@@ -166,12 +161,12 @@ mod tests {
         assert_eq!(
             formula,
             concat!(
-                "MIN(0.0, COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))) + ",
-                "MIN(0.0, COALESCE(#6, #5, 0.0)) + ",
-                "MIN(0.0, COALESCE(#7, 0.0)) + ",
-                "MIN(0.0, COALESCE(#8, 0.0)) + ",
-                "MIN(0.0, COALESCE(#13, 0.0)) + ",
-                "MIN(0.0, COALESCE(#14, 0.0))"
+                "MIN(COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0)), 0.0) + ",
+                "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
+                "MIN(COALESCE(#7, 0.0), 0.0) + ",
+                "MIN(COALESCE(#8, 0.0), 0.0) + ",
+                "MIN(COALESCE(#13, 0.0), 0.0) + ",
+                "MIN(COALESCE(#14, 0.0), 0.0)"
             )
         );
 

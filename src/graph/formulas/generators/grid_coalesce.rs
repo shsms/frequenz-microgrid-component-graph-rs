@@ -33,17 +33,19 @@ where
     /// inverters, and battery inverters that are directly connected to the
     /// grid.
     pub fn build(self) -> Result<CoalesceFormula, Error> {
-        Ok(CoalesceFormula::new(Expr::coalesce(
-            self.graph
-                .successors(self.graph.root_id)?
-                .filter(|node| {
-                    node.is_meter()
-                        || node.is_pv_inverter()
-                        || node.is_battery_inverter(&self.graph.config)
-                })
-                .map(|comp| Expr::component(comp.component_id()))
-                .collect(),
-        )))
+        let expr = self
+            .graph
+            .successors(self.graph.root_id)?
+            .filter(|node| {
+                node.is_meter()
+                    || node.is_pv_inverter()
+                    || node.is_battery_inverter(&self.graph.config)
+            })
+            .fold(Expr::None, |coalesced, component| {
+                coalesced.coalesce(Expr::component(component.component_id()))
+            });
+
+        Ok(CoalesceFormula::new(expr))
     }
 }
 

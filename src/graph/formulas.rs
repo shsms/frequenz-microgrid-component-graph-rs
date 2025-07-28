@@ -16,7 +16,8 @@ mod formula;
 mod generators;
 mod traversal;
 
-pub use formula::{AggregationFormula, CoalesceFormula};
+use expr::Expr;
+pub use formula::{AggregationFormula, CoalesceFormula, Formula};
 
 /// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>
@@ -63,20 +64,17 @@ where
         generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
     }
 
-    /// Returns the coalesce formula for the given component IDs.
-    ///
-    /// This formula uses the `COALESCE` function to return the first non-null
-    /// value from the components with the provided IDs.
-    pub fn coalesce(&self, component_ids: BTreeSet<u64>) -> Result<AggregationFormula, Error> {
-        generators::generic::CoalesceFormulaBuilder::try_new(self, component_ids)?.build()
-    }
-
-    /// Returns a string representing the EV charger formula for the graph.
+    /// Returns the EV charger formula for the graph.
     pub fn ev_charger_formula(
         &self,
         ev_charger_ids: Option<BTreeSet<u64>>,
     ) -> Result<AggregationFormula, Error> {
         generators::ev_charger::EVChargerFormulaBuilder::try_new(self, ev_charger_ids)?.build()
+    }
+
+    /// Returns the formula for a specific component by its ID.
+    pub fn component_formula(&self, component_id: u64) -> Result<AggregationFormula, Error> {
+        Ok(Expr::component(component_id).into())
     }
 
     /// Returns the grid coalesce formula for the graph.
@@ -128,5 +126,13 @@ where
     ) -> Result<CoalesceFormula, Error> {
         generators::pv_ac_coalesce::PVAcCoalesceFormulaBuilder::try_new(self, pv_inverter_ids)?
             .build()
+    }
+
+    /// Returns the AC coalesce formula for a specific component by its ID.
+    pub fn component_ac_coalesce_formula(
+        &self,
+        component_id: u64,
+    ) -> Result<CoalesceFormula, Error> {
+        Ok(Expr::component(component_id).into())
     }
 }

@@ -52,8 +52,7 @@ ErrorKind!(
     (Internal, internal),
     (InvalidComponent, invalid_component),
     (InvalidConnection, invalid_connection),
-    (InvalidGraph, invalid_graph),
-    (MissingParameters, missing_parameters)
+    (InvalidGraph, invalid_graph)
 );
 
 /// An error that can occur during the creation or traversal of a

@@ -57,7 +57,6 @@ where
     /// meters and inverters in the graph.
     pub fn build(self) -> Result<CoalesceFormula, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
-        let mut source_components: Vec<Expr> = vec![];
 
         for inv_id in &self.pv_inverter_ids {
             if !self.graph.component(*inv_id)?.is_pv_inverter() {
@@ -71,18 +70,15 @@ where
                 }
             }
         }
-        source_components.extend(
-            meters
-                .iter()
-                .chain(self.pv_inverter_ids.iter())
-                .map(|component_id: &u64| Expr::component(*component_id)),
-        );
 
-        if source_components.is_empty() {
-            return Err(Error::component_not_found("No PV inverters found."));
-        }
+        let coalesced = meters
+            .iter()
+            .chain(self.pv_inverter_ids.iter())
+            .fold(Expr::None, |expr, component_id: &u64| {
+                expr.coalesce(Expr::component(*component_id))
+            });
 
-        Ok(CoalesceFormula::new(Expr::coalesce(source_components)))
+        Ok(CoalesceFormula::new(coalesced))
     }
 }
 
@@ -101,11 +97,8 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.pv_ac_coalesce_formula(None);
-        assert_eq!(
-            formula,
-            Err(Error::component_not_found("No PV inverters found."))
-        );
+        let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
+        assert_eq!(formula, "None");
 
         // Add a PV meter with one PV inverter.
         let meter_pv_chain = builder.meter_pv_chain(1);

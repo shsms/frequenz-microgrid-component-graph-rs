@@ -59,7 +59,6 @@ where
     /// battery meters and inverters in the graph.
     pub fn build(self) -> Result<CoalesceFormula, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
-        let mut source_components: Vec<Expr> = vec![];
 
         for inv_id in &self.inverter_ids {
             for pred in self.graph.predecessors(*inv_id)? {
@@ -68,18 +67,14 @@ where
                 }
             }
         }
-        source_components.extend(
-            meters
-                .iter()
-                .chain(self.inverter_ids.iter())
-                .map(|component_id: &u64| Expr::component(*component_id)),
-        );
+        let coalesced = meters
+            .into_iter()
+            .chain(self.inverter_ids)
+            .fold(Expr::None, |expr, component_id: u64| {
+                expr.coalesce(Expr::component(component_id))
+            });
 
-        if source_components.is_empty() {
-            return Err(Error::component_not_found("No battery inverters found."));
-        }
-
-        Ok(CoalesceFormula::new(Expr::coalesce(source_components)))
+        Ok(CoalesceFormula::new(coalesced))
     }
 }
 
@@ -100,11 +95,8 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let graph = builder.build(None)?;
-        let formula = graph.battery_ac_coalesce_formula(None);
-        assert_eq!(
-            formula,
-            Err(Error::component_not_found("No battery inverters found."))
-        );
+        let formula = graph.battery_ac_coalesce_formula(None)?.to_string();
+        assert_eq!(formula, "None");
 
         // Add a battery meter with one inverter and one battery.
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
