@@ -152,14 +152,14 @@ impl Expr {
                 },
             ) => {
                 // If both parameters are coalesce expressions, merge them.
-                params.extend(other_params.into_iter());
-                return Self::Coalesce { params };
+                params.extend(other_params);
+                Self::Coalesce { params }
             }
             (Expr::Coalesce { mut params }, other) => {
                 // If the first parameter is a coalesce expression, add the second
                 // parameter to it.
                 params.push(other);
-                return Self::Coalesce { params };
+                Self::Coalesce { params }
             }
             (
                 param,
@@ -170,14 +170,14 @@ impl Expr {
                 // If the second parameter is a coalesce expression, add the first
                 // parameter to it.
                 let mut params = vec![param];
-                params.extend(other_params.into_iter());
-                return Self::Coalesce { params };
+                params.extend(other_params);
+                Self::Coalesce { params }
             }
             (first, second) => {
                 // If neither parameter is a coalesce expression, create a new one.
-                return Self::Coalesce {
+                Self::Coalesce {
                     params: vec![first, second],
-                };
+                }
             }
         }
     }
@@ -193,20 +193,20 @@ impl Expr {
                 },
             ) => {
                 // If both parameters are min expressions, merge them.
-                params.extend(other_params.into_iter());
-                return Self::Min { params };
+                params.extend(other_params);
+                Self::Min { params }
             }
             (Expr::Min { mut params }, other) | (other, Expr::Min { mut params }) => {
                 // If one parameter is a min expression, add the other parameter
                 // to it.
                 params.push(other);
-                return Self::Min { params };
+                Self::Min { params }
             }
             (first, second) => {
                 // If neither parameter is a min expression, create a new one.
-                return Self::Min {
+                Self::Min {
                     params: vec![first, second],
-                };
+                }
             }
         }
     }
@@ -222,20 +222,20 @@ impl Expr {
                 },
             ) => {
                 // If both parameters are max expressions, merge them.
-                params.extend(other_params.into_iter());
-                return Self::Max { params };
+                params.extend(other_params);
+                Self::Max { params }
             }
             (Expr::Max { mut params }, other) | (other, Expr::Max { mut params }) => {
                 // If one parameter is a max expression, add the other parameter
                 // to it.
                 params.push(other);
-                return Self::Max { params };
+                Self::Max { params }
             }
             (first, second) => {
                 // If neither parameter is a max expression, create a new one.
-                return Self::Max {
+                Self::Max {
                     params: vec![first, second],
-                };
+                }
             }
         }
     }

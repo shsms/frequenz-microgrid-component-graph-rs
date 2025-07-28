@@ -69,7 +69,7 @@ where
         }
         let coalesced = meters
             .into_iter()
-            .chain(self.inverter_ids.into_iter())
+            .chain(self.inverter_ids)
             .fold(Expr::None, |expr, component_id: u64| {
                 expr.coalesce(Expr::component(component_id))
             });
