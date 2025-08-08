@@ -185,7 +185,7 @@ mod tests {
             .unwrap()
             .is_battery_inverter(&unspec_inv_config));
         builder.pop_connection();
-        builder.add_component(ComponentCategory::Grid);
+        builder.add_component(ComponentCategory::GridConnectionPoint);
         assert!(builder
             .build(None)
             .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found.")));

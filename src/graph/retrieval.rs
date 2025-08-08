@@ -157,7 +157,7 @@ mod tests {
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
             TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(3, ComponentCategory::Meter),
             TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
@@ -186,7 +186,10 @@ mod tests {
 
         assert_eq!(
             graph.component(1),
-            Ok(&TestComponent::new(1, ComponentCategory::Grid))
+            Ok(&TestComponent::new(
+                1,
+                ComponentCategory::GridConnectionPoint
+            ))
         );
         assert_eq!(
             graph.component(5),

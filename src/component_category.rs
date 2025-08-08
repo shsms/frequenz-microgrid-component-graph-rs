@@ -74,7 +74,7 @@ impl Display for EvChargerType {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ComponentCategory {
     Unspecified,
-    Grid,
+    GridConnectionPoint,
     Meter,
     Battery(BatteryType),
     Inverter(InverterType),
@@ -94,7 +94,7 @@ impl Display for ComponentCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ComponentCategory::Unspecified => write!(f, "Unspecified"),
-            ComponentCategory::Grid => write!(f, "Grid"),
+            ComponentCategory::GridConnectionPoint => write!(f, "GridConnectionPoint"),
             ComponentCategory::Meter => write!(f, "Meter"),
             ComponentCategory::Battery(battery_type) => write!(f, "Battery({battery_type})"),
             ComponentCategory::Inverter(inverter_type) => write!(f, "{inverter_type}Inverter"),
@@ -121,7 +121,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_grid(&self) -> bool {
-        self.category() == ComponentCategory::Grid
+        self.category() == ComponentCategory::GridConnectionPoint
     }
 
     fn is_meter(&self) -> bool {

@@ -117,7 +117,7 @@ impl ComponentGraphBuilder {
 
     /// Adds a grid component to the graph and returns its handle.
     pub(super) fn grid(&mut self) -> ComponentHandle {
-        self.add_component(ComponentCategory::Grid)
+        self.add_component(ComponentCategory::GridConnectionPoint)
     }
 
     /// Adds a meter to the graph and returns its handle.
