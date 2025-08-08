@@ -72,7 +72,7 @@ where
                     self.ensure_not_leaf(inverter)?;
                     self.ensure_on_successors(inverter, |n| n.is_battery(), "Batteries")?;
                 }
-                InverterType::Solar => {
+                InverterType::Pv => {
                     self.ensure_leaf(inverter)?;
                 }
                 InverterType::Hybrid => {
@@ -161,22 +161,25 @@ mod tests {
     fn test_validate_root() {
         let config = ComponentGraphConfig::default();
         let components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
         ];
         let connections = vec![TestConnection::new(1, 2)];
         assert!(ComponentGraph::try_new(components, connections, config.clone()).is_ok());
 
-        let components = vec![TestComponent::new(1, ComponentCategory::Grid)];
+        let components = vec![TestComponent::new(
+            1,
+            ComponentCategory::GridConnectionPoint,
+        )];
         let connections: Vec<TestConnection> = vec![];
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph("Grid:1 must have at least one successor.")
+                e == Error::invalid_graph("GridConnectionPoint:1 must have at least one successor.")
             }),
         );
 
         let components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Meter),
         ];
@@ -188,9 +191,10 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph(
-                    "Grid:1 can't have successors with multiple predecessors. Found Meter:3.",
-                )
+                e == Error::invalid_graph(concat!(
+                    "GridConnectionPoint:1 can't have successors with ",
+                    "multiple predecessors. Found Meter:3."
+                ))
             }),
         );
     }
@@ -199,7 +203,7 @@ mod tests {
     fn test_validate_meter() {
         let config = ComponentGraphConfig::default();
         let components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
@@ -217,7 +221,7 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_battery_inverter() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(4, ComponentCategory::Electrolyzer),
@@ -265,9 +269,9 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_pv_inverter() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
-            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
@@ -280,7 +284,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "SolarInverter:3 can't have any successors. Found Electrolyzer:4.",
+                        "PvInverter:3 can't have any successors. Found Electrolyzer:4.",
                     )
                 }),
         );
@@ -305,7 +309,7 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_hybrid_inverter() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Hybrid)),
             TestComponent::new(4, ComponentCategory::Electrolyzer),
@@ -346,7 +350,7 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_batteries() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(4, ComponentCategory::Battery(BatteryType::NaIon)),
@@ -393,7 +397,7 @@ r#"InvalidGraph: Multiple validation failures:
         );
 
         let components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2)];
@@ -402,7 +406,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
                 e == Error::invalid_graph(concat!(
                     "Battery(LiIon):2 can only have predecessors that are ",
-                    "BatteryInverters or HybridInverters. Found Grid:1."
+                    "BatteryInverters or HybridInverters. Found GridConnectionPoint:1."
                 ))
             }),
         );
@@ -412,7 +416,7 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_ev_chargers() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::EvCharger(EvChargerType::Dc)),
             TestComponent::new(4, ComponentCategory::Electrolyzer),
@@ -441,7 +445,7 @@ r#"InvalidGraph: Multiple validation failures:
     fn test_validate_chps() {
         let config = ComponentGraphConfig::default();
         let mut components = vec![
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Chp),
             TestComponent::new(4, ComponentCategory::Electrolyzer),

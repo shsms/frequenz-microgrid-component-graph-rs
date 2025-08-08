@@ -91,9 +91,9 @@ mod tests {
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
             TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(1, ComponentCategory::Grid),
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(3, ComponentCategory::Meter),
             TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
             TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),

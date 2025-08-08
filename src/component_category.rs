@@ -12,7 +12,7 @@ use std::fmt::Display;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InverterType {
     Unspecified,
-    Solar,
+    Pv,
     Battery,
     Hybrid,
 }
@@ -21,7 +21,7 @@ impl Display for InverterType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InverterType::Unspecified => write!(f, "Unspecified"),
-            InverterType::Solar => write!(f, "Solar"),
+            InverterType::Pv => write!(f, "Pv"),
             InverterType::Battery => write!(f, "Battery"),
             InverterType::Hybrid => write!(f, "Hybrid"),
         }
@@ -74,27 +74,31 @@ impl Display for EvChargerType {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ComponentCategory {
     Unspecified,
-    Grid,
+    GridConnectionPoint,
     Meter,
-    Battery(BatteryType),
     Inverter(InverterType),
-    EvCharger(EvChargerType),
     Converter,
-    CryptoMiner,
-    Electrolyzer,
-    Chp,
+    Battery(BatteryType),
+    EvCharger(EvChargerType),
+    Breaker,
     Precharger,
-    Fuse,
-    VoltageTransformer,
+    Chp,
+    Electrolyzer,
+    PowerTransformer,
     Hvac,
-    Relay,
+    Plc,
+    CryptoMiner,
+    StaticTransferSwitch,
+    UninterruptiblePowerSupply,
+    CapacitorBank,
+    WindTurbine,
 }
 
 impl Display for ComponentCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ComponentCategory::Unspecified => write!(f, "Unspecified"),
-            ComponentCategory::Grid => write!(f, "Grid"),
+            ComponentCategory::GridConnectionPoint => write!(f, "GridConnectionPoint"),
             ComponentCategory::Meter => write!(f, "Meter"),
             ComponentCategory::Battery(battery_type) => write!(f, "Battery({battery_type})"),
             ComponentCategory::Inverter(inverter_type) => write!(f, "{inverter_type}Inverter"),
@@ -106,10 +110,16 @@ impl Display for ComponentCategory {
             ComponentCategory::Electrolyzer => write!(f, "Electrolyzer"),
             ComponentCategory::Chp => write!(f, "CHP"),
             ComponentCategory::Precharger => write!(f, "Precharger"),
-            ComponentCategory::Fuse => write!(f, "Fuse"),
-            ComponentCategory::VoltageTransformer => write!(f, "VoltageTransformer"),
             ComponentCategory::Hvac => write!(f, "HVAC"),
-            ComponentCategory::Relay => write!(f, "Relay"),
+            ComponentCategory::Breaker => write!(f, "Breaker"),
+            ComponentCategory::PowerTransformer => write!(f, "PowerTransformer"),
+            ComponentCategory::Plc => write!(f, "PLC"),
+            ComponentCategory::StaticTransferSwitch => write!(f, "StaticTransferSwitch"),
+            ComponentCategory::UninterruptiblePowerSupply => {
+                write!(f, "UninterruptiblePowerSupply")
+            }
+            ComponentCategory::CapacitorBank => write!(f, "CapacitorBank"),
+            ComponentCategory::WindTurbine => write!(f, "WindTurbine"),
         }
     }
 }
@@ -121,7 +131,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_grid(&self) -> bool {
-        self.category() == ComponentCategory::Grid
+        self.category() == ComponentCategory::GridConnectionPoint
     }
 
     fn is_meter(&self) -> bool {
@@ -147,7 +157,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_pv_inverter(&self) -> bool {
-        self.category() == ComponentCategory::Inverter(InverterType::Solar)
+        self.category() == ComponentCategory::Inverter(InverterType::Pv)
     }
 
     fn is_hybrid_inverter(&self) -> bool {
