@@ -108,13 +108,13 @@ mod tests {
             TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
             TestComponent::new(9, ComponentCategory::Meter),
-            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Solar)),
-            TestComponent::new(11, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Pv)),
+            TestComponent::new(11, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(12, ComponentCategory::Meter),
             TestComponent::new(13, ComponentCategory::Chp),
             TestComponent::new(14, ComponentCategory::Meter),
             TestComponent::new(15, ComponentCategory::Chp),
-            TestComponent::new(16, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(16, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(17, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(18, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
@@ -177,7 +177,7 @@ mod tests {
         components.push(TestComponent::new(24, ComponentCategory::Meter));
         components.push(TestComponent::new(
             25,
-            ComponentCategory::Inverter(InverterType::Solar),
+            ComponentCategory::Inverter(InverterType::Pv),
         ));
         connections.push(TestConnection::new(20, 24));
         connections.push(TestConnection::new(24, 25));

@@ -137,7 +137,7 @@ impl ComponentGraphBuilder {
 
     /// Adds a solar inverter to the graph and returns its handle.
     pub(super) fn solar_inverter(&mut self) -> ComponentHandle {
-        self.add_component(ComponentCategory::Inverter(InverterType::Solar))
+        self.add_component(ComponentCategory::Inverter(InverterType::Pv))
     }
 
     /// Adds an EV charger to the graph and returns its handle.

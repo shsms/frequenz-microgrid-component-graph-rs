@@ -72,7 +72,7 @@ where
                     self.ensure_not_leaf(inverter)?;
                     self.ensure_on_successors(inverter, |n| n.is_battery(), "Batteries")?;
                 }
-                InverterType::Solar => {
+                InverterType::Pv => {
                     self.ensure_leaf(inverter)?;
                 }
                 InverterType::Hybrid => {
@@ -271,7 +271,7 @@ r#"InvalidGraph: Multiple validation failures:
         let mut components = vec![
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
-            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Solar)),
+            TestComponent::new(3, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(4, ComponentCategory::Electrolyzer),
         ];
         let mut connections = vec![
@@ -284,7 +284,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "SolarInverter:3 can't have any successors. Found Electrolyzer:4.",
+                        "PvInverter:3 can't have any successors. Found Electrolyzer:4.",
                     )
                 }),
         );

@@ -12,7 +12,7 @@ use std::fmt::Display;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InverterType {
     Unspecified,
-    Solar,
+    Pv,
     Battery,
     Hybrid,
 }
@@ -21,7 +21,7 @@ impl Display for InverterType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InverterType::Unspecified => write!(f, "Unspecified"),
-            InverterType::Solar => write!(f, "Solar"),
+            InverterType::Pv => write!(f, "Pv"),
             InverterType::Battery => write!(f, "Battery"),
             InverterType::Hybrid => write!(f, "Hybrid"),
         }
@@ -147,7 +147,7 @@ pub(crate) trait CategoryPredicates: Node {
     }
 
     fn is_pv_inverter(&self) -> bool {
-        self.category() == ComponentCategory::Inverter(InverterType::Solar)
+        self.category() == ComponentCategory::Inverter(InverterType::Pv)
     }
 
     fn is_hybrid_inverter(&self) -> bool {
