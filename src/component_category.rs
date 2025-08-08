@@ -76,18 +76,22 @@ pub enum ComponentCategory {
     Unspecified,
     GridConnectionPoint,
     Meter,
-    Battery(BatteryType),
     Inverter(InverterType),
-    EvCharger(EvChargerType),
     Converter,
-    CryptoMiner,
-    Electrolyzer,
-    Chp,
+    Battery(BatteryType),
+    EvCharger(EvChargerType),
+    Breaker,
     Precharger,
-    Fuse,
-    VoltageTransformer,
+    Chp,
+    Electrolyzer,
+    PowerTransformer,
     Hvac,
-    Relay,
+    Plc,
+    CryptoMiner,
+    StaticTransferSwitch,
+    UninterruptiblePowerSupply,
+    CapacitorBank,
+    WindTurbine,
 }
 
 impl Display for ComponentCategory {
@@ -106,10 +110,16 @@ impl Display for ComponentCategory {
             ComponentCategory::Electrolyzer => write!(f, "Electrolyzer"),
             ComponentCategory::Chp => write!(f, "CHP"),
             ComponentCategory::Precharger => write!(f, "Precharger"),
-            ComponentCategory::Fuse => write!(f, "Fuse"),
-            ComponentCategory::VoltageTransformer => write!(f, "VoltageTransformer"),
             ComponentCategory::Hvac => write!(f, "HVAC"),
-            ComponentCategory::Relay => write!(f, "Relay"),
+            ComponentCategory::Breaker => write!(f, "Breaker"),
+            ComponentCategory::PowerTransformer => write!(f, "PowerTransformer"),
+            ComponentCategory::Plc => write!(f, "PLC"),
+            ComponentCategory::StaticTransferSwitch => write!(f, "StaticTransferSwitch"),
+            ComponentCategory::UninterruptiblePowerSupply => {
+                write!(f, "UninterruptiblePowerSupply")
+            }
+            ComponentCategory::CapacitorBank => write!(f, "CapacitorBank"),
+            ComponentCategory::WindTurbine => write!(f, "WindTurbine"),
         }
     }
 }
