@@ -1,7 +1,10 @@
 [package]
 name = "frequenz-microgrid-component-graph"
+description = "A library for representing the components of a microgrid and the connections between them as a Directed Acyclic Graph (DAG)."
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/frequenz-floss/frequenz-microgrid-component-graph-rs"
+license = "MIT"
 
 [lib]
 name = "frequenz_microgrid_component_graph"
