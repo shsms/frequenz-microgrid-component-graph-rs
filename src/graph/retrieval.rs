@@ -24,14 +24,14 @@ where
     }
 
     /// Returns an iterator over the components in the graph.
-    pub fn components(&self) -> Components<N> {
+    pub fn components(&self) -> Components<'_, N> {
         Components {
             iter: self.graph.raw_nodes().iter(),
         }
     }
 
     /// Returns an iterator over the connections in the graph.
-    pub fn connections(&self) -> Connections<N, E> {
+    pub fn connections(&self) -> Connections<'_, N, E> {
         Connections {
             cg: self,
             iter: self.graph.raw_edges().iter(),
@@ -42,7 +42,7 @@ where
     /// given `component_id`.
     ///
     /// Returns an error if the given `component_id` does not exist.
-    pub fn predecessors(&self, component_id: u64) -> Result<Neighbors<N>, Error> {
+    pub fn predecessors(&self, component_id: u64) -> Result<Neighbors<'_, N>, Error> {
         self.node_indices
             .get(&component_id)
             .map(|&index| Neighbors {
@@ -60,7 +60,7 @@ where
     /// given `component_id`.
     ///
     /// Returns an error if the given `component_id` does not exist.
-    pub fn successors(&self, component_id: u64) -> Result<Neighbors<N>, Error> {
+    pub fn successors(&self, component_id: u64) -> Result<Neighbors<'_, N>, Error> {
         self.node_indices
             .get(&component_id)
             .map(|&index| Neighbors {
@@ -81,7 +81,7 @@ where
     pub(crate) fn siblings_from_predecessors(
         &self,
         component_id: u64,
-    ) -> Result<Siblings<N>, Error> {
+    ) -> Result<Siblings<'_, N>, Error> {
         Ok(Siblings::new(
             component_id,
             self.predecessors(component_id)?
@@ -96,7 +96,10 @@ where
     /// given `component_id`, that have shared successors.
     ///
     /// Returns an error if the given `component_id` does not exist.
-    pub(crate) fn siblings_from_successors(&self, component_id: u64) -> Result<Siblings<N>, Error> {
+    pub(crate) fn siblings_from_successors(
+        &self,
+        component_id: u64,
+    ) -> Result<Siblings<'_, N>, Error> {
         Ok(Siblings::new(
             component_id,
             self.successors(component_id)?
