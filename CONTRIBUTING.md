@@ -6,11 +6,16 @@ These are the steps to create a new release:
 
 1. Get the latest head you want to create a release from.
 
-2. Update the `RELEASE_NOTES.md` file if it is not complete, up to date, and
-   remove template comments (`<!-- ... ->`) and empty sections. Submit a pull
-   request if an update is needed, wait until it is merged, and update the
-   latest head you want to create a release from to get the new merged pull
-   request.
+2. Update the version in `Cargo.toml` to the new version.  Without this,
+   the new release will be rejected by `crates.io`.
+
+   Along with this, update the `RELEASE_NOTES.md` file if it is not
+   complete, up to date, and remove template comments (`<!-- ... ->`)
+   and empty sections.
+
+   Submit a pull request if an update is needed, wait until it is
+   merged, and update the latest head you want to create a release
+   from to get the new merged pull request.
 
 3. Create a new signed tag using the release notes and
    a [semver](https://semver.org/) compatible version number with a `v` prefix,
