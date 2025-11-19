@@ -150,15 +150,24 @@ where
             )));
         }
 
-        for sibling in siblings {
-            component_ids.remove(&sibling.component_id());
-        }
-
+        // Collect predecessor meter ids.
         let predecessor_ids: BTreeSet<u64> = self
             .graph
             .predecessors(component_id)?
+            .filter(|x| x.is_meter())
             .map(|x| x.component_id())
             .collect();
+
+        if predecessor_ids.is_empty() {
+            return Ok(Some(Expr::coalesce(
+                Expr::component(component_id),
+                Expr::number(0.0),
+            )));
+        }
+
+        for sibling in siblings {
+            component_ids.remove(&sibling.component_id());
+        }
 
         Ok(Some(self.generate(predecessor_ids)?))
     }
@@ -300,5 +309,27 @@ mod tests {
         assert_eq!(expr.to_string(), "COALESCE(#7, 0.0) + COALESCE(#14, 0.0)");
 
         Ok(())
+    }
+
+    /// Test fallback expression generation when there are no meters in the
+    /// graph, with only PV inverters directly connected to the grid.
+    #[test]
+    fn test_no_meters() {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let inverter = builder.solar_inverter();
+        builder.connect(grid, inverter);
+
+        let graph = builder.build(None).unwrap();
+        let expr = graph.pv_formula(None).unwrap().to_string();
+        assert_eq!(expr, "COALESCE(#1, 0.0)");
+
+        let inverter = builder.solar_inverter();
+        builder.connect(grid, inverter);
+
+        let graph = builder.build(None).unwrap();
+        let expr = graph.pv_formula(None).unwrap().to_string();
+        assert_eq!(expr, "COALESCE(#1, 0.0) + COALESCE(#2, 0.0)");
     }
 }
