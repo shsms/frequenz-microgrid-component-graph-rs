@@ -62,7 +62,7 @@ where
         }
 
         self.graph
-            .fallback_expr(self.pv_inverter_ids, false)
+            .fallback_expr(self.pv_inverter_ids, false, false)
             .map(AggregationFormula::new)
     }
 }

@@ -59,7 +59,7 @@ where
         }
 
         self.graph
-            .fallback_expr(self.chp_ids, false)
+            .fallback_expr(self.chp_ids, false, false)
             .map(AggregationFormula::new)
     }
 }

@@ -33,7 +33,9 @@ where
     pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = self.graph.fallback_expr([comp.component_id()], true)?;
+            let comp = self
+                .graph
+                .fallback_expr([comp.component_id()], true, false)?;
             expr = match expr {
                 None => Some(comp),
                 Some(e) => Some(comp + e),

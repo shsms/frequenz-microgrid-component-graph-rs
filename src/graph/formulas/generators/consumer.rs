@@ -95,7 +95,7 @@ where
             // Subtract each successor from the expression.
             for successor in successors {
                 let successor_expr = if successor.1.is_meter() {
-                    self.graph.fallback_expr([successor.0], true)?
+                    self.graph.fallback_expr([successor.0], true, false)?
                 } else {
                     Expr::from(successor.1)
                 };

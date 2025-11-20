@@ -47,7 +47,7 @@ where
         )? {
             let comp_expr = self
                 .graph
-                .fallback_expr([component_id], false)?
+                .fallback_expr([component_id], false, false)?
                 .min(Expr::number(0.0));
             expr = match expr {
                 None => Some(comp_expr),

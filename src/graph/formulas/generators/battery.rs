@@ -55,7 +55,7 @@ where
         }
 
         self.graph
-            .fallback_expr(self.inverter_ids, false)
+            .fallback_expr(self.inverter_ids, false, false)
             .map(AggregationFormula::new)
     }
 

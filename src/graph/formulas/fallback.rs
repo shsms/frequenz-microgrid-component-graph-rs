@@ -20,9 +20,11 @@ where
         &self,
         component_ids: impl IntoIterator<Item = u64>,
         prefer_meters: bool,
+        meter_fallback_for_meters: bool,
     ) -> Result<Expr, Error> {
         FallbackExpr {
             prefer_meters,
+            meter_fallback_for_meters,
             graph: self,
         }
         .generate(BTreeSet::from_iter(component_ids))
@@ -35,6 +37,7 @@ where
     E: Edge,
 {
     pub(crate) prefer_meters: bool,
+    pub(crate) meter_fallback_for_meters: bool,
     pub(crate) graph: &'a ComponentGraph<N, E>,
 }
 
@@ -67,8 +70,13 @@ where
     /// Returns a fallback expression for a meter component.
     fn meter_fallback(&self, component_id: u64) -> Result<Option<Expr>, Error> {
         let component = self.graph.component(component_id)?;
-        if !component.is_meter() || self.graph.has_meter_successors(component_id)? {
+        if !component.is_meter() {
             return Ok(None);
+        }
+        let has_successor_meters = self.graph.has_meter_successors(component_id)?;
+
+        if !self.meter_fallback_for_meters && has_successor_meters {
+            return Ok(Some(Expr::component(component_id)));
         }
 
         if !self.graph.has_successors(component_id)? {
@@ -91,6 +99,13 @@ where
 
         let has_multiple_successors = matches!(sum_of_successors, Expr::Add { .. });
 
+        // If a meter has exactly one successor and it is a meter, we consider
+        // it to be a fallback meter.  If there are multiple meter successors,
+        // we return the meter without fallback.
+        if has_successor_meters && has_multiple_successors {
+            return Ok(Some(Expr::component(component_id)));
+        }
+
         let mut coalesced = Expr::component(component_id);
 
         if !self.prefer_meters {
@@ -102,11 +117,13 @@ where
                 coalesced = coalesced.coalesce(sum_of_coalesced_successors);
             } else {
                 coalesced = coalesced.coalesce(sum_of_successors);
-                coalesced = coalesced.coalesce(Expr::number(0.0));
+                if !has_successor_meters {
+                    coalesced = coalesced.coalesce(Expr::number(0.0));
+                }
             }
         } else if has_multiple_successors {
             coalesced = coalesced.coalesce(sum_of_coalesced_successors);
-        } else {
+        } else if !has_successor_meters {
             coalesced = coalesced.coalesce(Expr::number(0.0));
         }
 
@@ -202,26 +219,36 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![1, 2], false)?;
+        let expr = graph.fallback_expr(vec![1], true, true)?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+
+        let expr = graph.fallback_expr(vec![1, 2], true, true)?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2) + COALESCE(#2, #3, 0.0)");
+
+        let expr = graph.fallback_expr(vec![1, 2], false, false)?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2, 0.0)");
 
-        let expr = graph.fallback_expr(vec![1, 2], true)?;
+        let expr = graph.fallback_expr(vec![1, 2], true, false)?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
 
-        let expr = graph.fallback_expr(vec![3], true)?;
+        let expr = graph.fallback_expr(vec![3], true, false)?;
+        assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
+        let expr = graph.fallback_expr(vec![3], true, true)?;
+        assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
+        let expr = graph.fallback_expr(vec![2], true, true)?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
 
         let graph = builder.build(Some(ComponentGraphConfig {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = graph.fallback_expr(vec![1, 2], false)?;
+        let expr = graph.fallback_expr(vec![1, 2], false, false)?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = graph.fallback_expr(vec![1, 2], true)?;
+        let expr = graph.fallback_expr(vec![1, 2], true, false)?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = graph.fallback_expr(vec![3], true)?;
+        let expr = graph.fallback_expr(vec![3], true, false)?;
         assert_eq!(expr.to_string(), "#3");
 
         // Add a battery meter with three inverter and three batteries
@@ -231,7 +258,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 5);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![3, 5], false)?;
+        let expr = graph.fallback_expr(vec![3, 5], false, false)?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -244,7 +271,7 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 5], true)?;
+        let expr = graph.fallback_expr(vec![2, 5], true, false)?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -253,7 +280,7 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true)?;
+        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true, false)?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -262,7 +289,7 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 7, 8], true)?;
+        let expr = graph.fallback_expr(vec![2, 7, 8], true, false)?;
         assert_eq!(
             expr.to_string(),
             "COALESCE(#2, #3, 0.0) + COALESCE(#7, 0.0) + COALESCE(#8, 0.0)"
@@ -272,16 +299,16 @@ mod tests {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = graph.fallback_expr(vec![3, 5], false)?;
+        let expr = graph.fallback_expr(vec![3, 5], false, false)?;
         assert_eq!(expr.to_string(), "#3 + #5");
 
-        let expr = graph.fallback_expr(vec![2, 5], true)?;
+        let expr = graph.fallback_expr(vec![2, 5], true, false)?;
         assert_eq!(expr.to_string(), "#2 + #5");
 
-        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true)?;
+        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true, false)?;
         assert_eq!(expr.to_string(), "#2 + #6 + #7 + #8");
 
-        let expr = graph.fallback_expr(vec![2, 7, 8], true)?;
+        let expr = graph.fallback_expr(vec![2, 7, 8], true, false)?;
         assert_eq!(expr.to_string(), "#2 + #7 + #8");
 
         let meter = builder.meter();
@@ -296,7 +323,7 @@ mod tests {
         assert_eq!(pv_inverter.component_id(), 14);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![5, 12], true)?;
+        let expr = graph.fallback_expr(vec![5, 12], true, false)?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -305,7 +332,7 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![7, 14], false)?;
+        let expr = graph.fallback_expr(vec![7, 14], false, false)?;
         assert_eq!(expr.to_string(), "COALESCE(#7, 0.0) + COALESCE(#14, 0.0)");
 
         Ok(())

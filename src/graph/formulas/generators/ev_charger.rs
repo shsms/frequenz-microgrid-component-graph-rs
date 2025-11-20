@@ -62,7 +62,7 @@ where
         }
 
         self.graph
-            .fallback_expr(self.ev_charger_ids, false)
+            .fallback_expr(self.ev_charger_ids, false, false)
             .map(AggregationFormula::new)
     }
 }
