@@ -1,5 +1,5 @@
 # Frequenz Component Graph Release Notes
 
-## Bug Fixes
+## New Features
 
-- This fixes a bug in a rare case where the grid component could get picked as a fallback component.
+- Grid formulas now use single successor meters as fallback components for meters attached to the grid.
