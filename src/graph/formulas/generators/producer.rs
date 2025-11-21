@@ -3,8 +3,11 @@
 
 //! This module contains the methods for generating producer formulas.
 
+use std::collections::BTreeSet;
+
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::fallback::FallbackExpr;
 use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -45,10 +48,12 @@ where
             petgraph::Direction::Outgoing,
             false,
         )? {
-            let comp_expr = self
-                .graph
-                .fallback_expr([component_id], false, false)?
-                .min(Expr::number(0.0));
+            let comp_expr = FallbackExpr {
+                prefer_meters: false,
+                meter_fallback_for_meters: false,
+            }
+            .generate(self.graph, BTreeSet::from([component_id]))?
+            .min(Expr::number(0.0));
             expr = match expr {
                 None => Some(comp_expr),
                 Some(e) => Some(e + comp_expr),

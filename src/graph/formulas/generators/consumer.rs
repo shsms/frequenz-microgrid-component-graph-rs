@@ -7,8 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::expr::Expr;
 use crate::{
-    component_category::CategoryPredicates, graph::formulas::AggregationFormula, ComponentGraph,
-    Edge, Error, Node,
+    component_category::CategoryPredicates,
+    graph::formulas::{fallback::FallbackExpr, AggregationFormula},
+    ComponentGraph, Edge, Error, Node,
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -95,7 +96,11 @@ where
             // Subtract each successor from the expression.
             for successor in successors {
                 let successor_expr = if successor.1.is_meter() {
-                    self.graph.fallback_expr([successor.0], true, false)?
+                    FallbackExpr {
+                        prefer_meters: true,
+                        meter_fallback_for_meters: false,
+                    }
+                    .generate(self.graph, BTreeSet::from([successor.0]))?
                 } else {
                     Expr::from(successor.1)
                 };

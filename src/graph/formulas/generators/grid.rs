@@ -3,8 +3,10 @@
 
 //! This module contains the methods for generating grid formulas.
 
+use std::collections::BTreeSet;
+
 use crate::{
-    graph::formulas::{expr::Expr, AggregationFormula},
+    graph::formulas::{expr::Expr, fallback::FallbackExpr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -33,9 +35,11 @@ where
     pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = self
-                .graph
-                .fallback_expr([comp.component_id()], true, true)?;
+            let comp = FallbackExpr {
+                prefer_meters: true,
+                meter_fallback_for_meters: true,
+            }
+            .generate(self.graph, BTreeSet::from([comp.component_id()]))?;
             expr = match expr {
                 None => Some(comp),
                 Some(e) => Some(comp + e),
