@@ -9,27 +9,6 @@ use std::collections::BTreeSet;
 
 use super::expr::Expr;
 
-impl<N, E> ComponentGraph<N, E>
-where
-    N: Node,
-    E: Edge,
-{
-    /// Returns a formula expression with fallbacks where possible for the `sum`
-    /// of the given component ids.
-    pub(super) fn fallback_expr(
-        &self,
-        component_ids: impl IntoIterator<Item = u64>,
-        prefer_meters: bool,
-        meter_fallback_for_meters: bool,
-    ) -> Result<Expr, Error> {
-        FallbackExpr {
-            prefer_meters,
-            meter_fallback_for_meters,
-        }
-        .generate(self, BTreeSet::from_iter(component_ids))
-    }
-}
-
 pub(crate) struct FallbackExpr {
     pub(crate) prefer_meters: bool,
     pub(crate) meter_fallback_for_meters: bool,
