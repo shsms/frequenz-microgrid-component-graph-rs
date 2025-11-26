@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
+use crate::graph::formulas::fallback::FallbackExpr;
 use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -54,9 +55,12 @@ where
             return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
-        self.graph
-            .fallback_expr(self.inverter_ids, false)
-            .map(AggregationFormula::new)
+        FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(self.graph, self.inverter_ids.clone())
+        .map(AggregationFormula::new)
     }
 
     pub(super) fn find_inverter_ids(

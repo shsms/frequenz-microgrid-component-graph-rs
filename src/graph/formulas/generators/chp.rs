@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::expr::Expr;
+use crate::graph::formulas::fallback::FallbackExpr;
 use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -58,9 +59,12 @@ where
             }
         }
 
-        self.graph
-            .fallback_expr(self.chp_ids, false)
-            .map(AggregationFormula::new)
+        FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(self.graph, self.chp_ids.clone())
+        .map(AggregationFormula::new)
     }
 }
 

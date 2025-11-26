@@ -9,52 +9,30 @@ use std::collections::BTreeSet;
 
 use super::expr::Expr;
 
-impl<N, E> ComponentGraph<N, E>
-where
-    N: Node,
-    E: Edge,
-{
-    /// Returns a formula expression with fallbacks where possible for the `sum`
-    /// of the given component ids.
-    pub(super) fn fallback_expr(
-        &self,
-        component_ids: impl IntoIterator<Item = u64>,
-        prefer_meters: bool,
-    ) -> Result<Expr, Error> {
-        FallbackExpr {
-            prefer_meters,
-            graph: self,
-        }
-        .generate(BTreeSet::from_iter(component_ids))
-    }
-}
-
-struct FallbackExpr<'a, N, E>
-where
-    N: Node,
-    E: Edge,
-{
+pub(crate) struct FallbackExpr {
     pub(crate) prefer_meters: bool,
-    pub(crate) graph: &'a ComponentGraph<N, E>,
+    pub(crate) meter_fallback_for_meters: bool,
 }
 
-impl<N, E> FallbackExpr<'_, N, E>
-where
-    N: Node,
-    E: Edge,
-{
-    fn generate(&self, mut component_ids: BTreeSet<u64>) -> Result<Expr, Error> {
+impl FallbackExpr {
+    pub(crate) fn generate<N: Node, E: Edge>(
+        &self,
+        graph: &ComponentGraph<N, E>,
+        mut component_ids: BTreeSet<u64>,
+    ) -> Result<Expr, Error> {
         let mut formula = None::<Expr>;
-        if self.graph.config.disable_fallback_components {
+        if graph.config.disable_fallback_components {
             while let Some(component_id) = component_ids.pop_first() {
                 formula = Self::add_to_option(formula, Expr::component(component_id));
             }
             return formula.ok_or(Error::internal("No components to generate formula."));
         }
         while let Some(component_id) = component_ids.pop_first() {
-            if let Some(expr) = self.meter_fallback(component_id)? {
+            if let Some(expr) = self.meter_fallback(graph, component_id)? {
                 formula = Self::add_to_option(formula, expr);
-            } else if let Some(expr) = self.component_fallback(&mut component_ids, component_id)? {
+            } else if let Some(expr) =
+                self.component_fallback(graph, &mut component_ids, component_id)?
+            {
                 formula = Self::add_to_option(formula, expr);
             } else {
                 formula = Self::add_to_option(formula, Expr::component(component_id));
@@ -65,18 +43,26 @@ where
     }
 
     /// Returns a fallback expression for a meter component.
-    fn meter_fallback(&self, component_id: u64) -> Result<Option<Expr>, Error> {
-        let component = self.graph.component(component_id)?;
-        if !component.is_meter() || self.graph.has_meter_successors(component_id)? {
+    fn meter_fallback<N: Node, E: Edge>(
+        &self,
+        graph: &ComponentGraph<N, E>,
+        component_id: u64,
+    ) -> Result<Option<Expr>, Error> {
+        let component = graph.component(component_id)?;
+        if !component.is_meter() {
             return Ok(None);
         }
+        let has_successor_meters = graph.has_meter_successors(component_id)?;
 
-        if !self.graph.has_successors(component_id)? {
+        if !self.meter_fallback_for_meters && has_successor_meters {
             return Ok(Some(Expr::component(component_id)));
         }
 
-        let (sum_of_successors, sum_of_coalesced_successors) = self
-            .graph
+        if !graph.has_successors(component_id)? {
+            return Ok(Some(Expr::component(component_id)));
+        }
+
+        let (sum_of_successors, sum_of_coalesced_successors) = graph
             .successors(component_id)?
             .map(|node| {
                 (
@@ -91,6 +77,13 @@ where
 
         let has_multiple_successors = matches!(sum_of_successors, Expr::Add { .. });
 
+        // If a meter has exactly one successor and it is a meter, we consider
+        // it to be a fallback meter.  If there are multiple meter successors,
+        // we return the meter without fallback.
+        if has_successor_meters && has_multiple_successors {
+            return Ok(Some(Expr::component(component_id)));
+        }
+
         let mut coalesced = Expr::component(component_id);
 
         if !self.prefer_meters {
@@ -102,11 +95,13 @@ where
                 coalesced = coalesced.coalesce(sum_of_coalesced_successors);
             } else {
                 coalesced = coalesced.coalesce(sum_of_successors);
-                coalesced = coalesced.coalesce(Expr::number(0.0));
+                if !has_successor_meters {
+                    coalesced = coalesced.coalesce(Expr::number(0.0));
+                }
             }
         } else if has_multiple_successors {
             coalesced = coalesced.coalesce(sum_of_coalesced_successors);
-        } else {
+        } else if !has_successor_meters {
             coalesced = coalesced.coalesce(Expr::number(0.0));
         }
 
@@ -119,13 +114,14 @@ where
     /// - Battery Inverter
     /// - PV Inverter
     /// - EV Charger
-    fn component_fallback(
+    fn component_fallback<N: Node, E: Edge>(
         &self,
+        graph: &ComponentGraph<N, E>,
         component_ids: &mut BTreeSet<u64>,
         component_id: u64,
     ) -> Result<Option<Expr>, Error> {
-        let component = self.graph.component(component_id)?;
-        if !component.is_battery_inverter(&self.graph.config)
+        let component = graph.component(component_id)?;
+        if !component.is_battery_inverter(&graph.config)
             && !component.is_chp()
             && !component.is_pv_inverter()
             && !component.is_ev_charger()
@@ -135,8 +131,7 @@ where
 
         // If predecessors have other successors that are not in the list of
         // component ids, the predecessors can't be used as fallback.
-        let siblings = self
-            .graph
+        let siblings = graph
             .siblings_from_predecessors(component_id)?
             .filter(|sibling| sibling.component_id() != component_id)
             .collect::<Vec<_>>();
@@ -151,8 +146,7 @@ where
         }
 
         // Collect predecessor meter ids.
-        let predecessor_ids: BTreeSet<u64> = self
-            .graph
+        let predecessor_ids: BTreeSet<u64> = graph
             .predecessors(component_id)?
             .filter(|x| x.is_meter())
             .map(|x| x.component_id())
@@ -169,7 +163,7 @@ where
             component_ids.remove(&sibling.component_id());
         }
 
-        Ok(Some(self.generate(predecessor_ids)?))
+        Ok(Some(self.generate(graph, predecessor_ids)?))
     }
 
     fn add_to_option(expr: Option<Expr>, other: Expr) -> Option<Expr> {
@@ -183,7 +177,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{graph::test_utils::ComponentGraphBuilder, ComponentGraphConfig, Error};
+    use std::collections::BTreeSet;
+
+    use crate::{
+        graph::{formulas::fallback::FallbackExpr, test_utils::ComponentGraphBuilder},
+        ComponentGraphConfig, Error,
+    };
 
     #[test]
     fn test_meter_fallback() -> Result<(), Error> {
@@ -202,26 +201,76 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![1, 2], false)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: true,
+        }
+        .generate(&graph, BTreeSet::from([1]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: true,
+        }
+        .generate(&graph, BTreeSet::from([1, 2]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2) + COALESCE(#2, #3, 0.0)");
+
+        let expr = FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2, 0.0)");
 
-        let expr = graph.fallback_expr(vec![1, 2], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
 
-        let expr = graph.fallback_expr(vec![3], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([3]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: true,
+        }
+        .generate(&graph, BTreeSet::from([3]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: true,
+        }
+        .generate(&graph, BTreeSet::from([2]))?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
 
         let graph = builder.build(Some(ComponentGraphConfig {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = graph.fallback_expr(vec![1, 2], false)?;
+        let expr = FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = graph.fallback_expr(vec![1, 2], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = graph.fallback_expr(vec![3], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([3]))?;
         assert_eq!(expr.to_string(), "#3");
 
         // Add a battery meter with three inverter and three batteries
@@ -231,7 +280,11 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 5);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![3, 5], false)?;
+        let expr = FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([3, 5]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -244,7 +297,11 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 5], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 5]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -253,7 +310,11 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -262,7 +323,11 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![2, 7, 8], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 7, 8]))?;
         assert_eq!(
             expr.to_string(),
             "COALESCE(#2, #3, 0.0) + COALESCE(#7, 0.0) + COALESCE(#8, 0.0)"
@@ -272,16 +337,32 @@ mod tests {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = graph.fallback_expr(vec![3, 5], false)?;
+        let expr = FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([3, 5]))?;
         assert_eq!(expr.to_string(), "#3 + #5");
 
-        let expr = graph.fallback_expr(vec![2, 5], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 5]))?;
         assert_eq!(expr.to_string(), "#2 + #5");
 
-        let expr = graph.fallback_expr(vec![2, 6, 7, 8], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
         assert_eq!(expr.to_string(), "#2 + #6 + #7 + #8");
 
-        let expr = graph.fallback_expr(vec![2, 7, 8], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([2, 7, 8]))?;
         assert_eq!(expr.to_string(), "#2 + #7 + #8");
 
         let meter = builder.meter();
@@ -296,7 +377,11 @@ mod tests {
         assert_eq!(pv_inverter.component_id(), 14);
 
         let graph = builder.build(None)?;
-        let expr = graph.fallback_expr(vec![5, 12], true)?;
+        let expr = FallbackExpr {
+            prefer_meters: true,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([5, 12]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -305,7 +390,11 @@ mod tests {
             )
         );
 
-        let expr = graph.fallback_expr(vec![7, 14], false)?;
+        let expr = FallbackExpr {
+            prefer_meters: false,
+            meter_fallback_for_meters: false,
+        }
+        .generate(&graph, BTreeSet::from([7, 14]))?;
         assert_eq!(expr.to_string(), "COALESCE(#7, 0.0) + COALESCE(#14, 0.0)");
 
         Ok(())

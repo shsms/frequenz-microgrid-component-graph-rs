@@ -3,8 +3,10 @@
 
 //! This module contains the methods for generating grid formulas.
 
+use std::collections::BTreeSet;
+
 use crate::{
-    graph::formulas::{expr::Expr, AggregationFormula},
+    graph::formulas::{expr::Expr, fallback::FallbackExpr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
 };
 
@@ -33,7 +35,11 @@ where
     pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = self.graph.fallback_expr([comp.component_id()], true)?;
+            let comp = FallbackExpr {
+                prefer_meters: true,
+                meter_fallback_for_meters: true,
+            }
+            .generate(self.graph, BTreeSet::from([comp.component_id()]))?;
             expr = match expr {
                 None => Some(comp),
                 Some(e) => Some(comp + e),
@@ -57,13 +63,18 @@ mod tests {
 
         // Add a grid meter and a battery chain behind it.
         let grid_meter = builder.meter();
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
         builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, meter_bat_chain);
 
         let graph = builder.build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "#1");
+
+        let meter_bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid_meter, meter_bat_chain);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_formula()?.to_string();
+        assert_eq!(formula, "COALESCE(#1, #2)");
 
         // Add an additional dangling meter, and a PV chain and a battery chain
         // to the grid
@@ -82,7 +93,7 @@ mod tests {
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
-            "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0)"
+            "COALESCE(#1, #2) + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0)"
         );
 
         // Add a PV inverter to the grid, without a meter.
@@ -95,7 +106,7 @@ mod tests {
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
-            "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0) + COALESCE(#11, 0.0)"
+            "COALESCE(#1, #2) + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0) + COALESCE(#11, 0.0)"
         );
 
         Ok(())
