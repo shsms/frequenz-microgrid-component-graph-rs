@@ -6,7 +6,7 @@
 
 use petgraph::graph::DiGraph;
 
-use crate::{component_category::CategoryPredicates, ComponentGraphConfig, Edge, Error, Node};
+use crate::{ComponentGraphConfig, Edge, Error, Node, component_category::CategoryPredicates};
 
 use super::{ComponentGraph, EdgeMap, NodeIndexMap};
 
@@ -120,9 +120,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::test_utils::{ComponentGraphBuilder, ComponentHandle};
     use crate::ComponentCategory;
     use crate::InverterType;
+    use crate::graph::test_utils::{ComponentGraphBuilder, ComponentHandle};
 
     fn nodes_and_edges() -> (ComponentGraphBuilder, ComponentHandle) {
         let mut builder = ComponentGraphBuilder::new();
@@ -141,9 +141,11 @@ mod tests {
     fn test_component_validation() {
         let (mut builder, grid_meter) = nodes_and_edges();
 
-        assert!(builder
-            .build(None)
-            .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),);
+        assert!(
+            builder
+                .build(None)
+                .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),
+        );
 
         let grid = builder.grid();
         builder.connect(grid, grid_meter);
@@ -151,16 +153,18 @@ mod tests {
         assert!(builder.build(None).is_ok());
 
         builder.add_component_with_id(2, ComponentCategory::Meter);
-        assert!(builder
-            .build(None)
-            .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2")));
+        assert!(
+            builder
+                .build(None)
+                .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2"))
+        );
 
         builder.pop_component();
         builder.add_component(ComponentCategory::Unspecified);
-        assert!(builder
-            .build(None)
-            .is_err_and(|e| e
-                == Error::invalid_component("ComponentCategory not specified for component: 8")));
+        assert!(
+            builder.build(None).is_err_and(|e| e
+                == Error::invalid_component("ComponentCategory not specified for component: 8"))
+        );
 
         builder.pop_component();
         let unspec_inv =
@@ -180,15 +184,19 @@ mod tests {
 
         assert!(builder.build(Some(unspec_inv_config.clone())).is_ok());
 
-        assert!(builder
-            .pop_component()
-            .unwrap()
-            .is_battery_inverter(&unspec_inv_config));
+        assert!(
+            builder
+                .pop_component()
+                .unwrap()
+                .is_battery_inverter(&unspec_inv_config)
+        );
         builder.pop_connection();
         builder.add_component(ComponentCategory::GridConnectionPoint);
-        assert!(builder
-            .build(None)
-            .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found.")));
+        assert!(
+            builder
+                .build(None)
+                .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found."))
+        );
 
         builder.pop_component();
         assert!(builder.build(None).is_ok());

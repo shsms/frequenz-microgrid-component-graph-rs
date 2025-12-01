@@ -148,14 +148,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ComponentCategory;
+    use crate::ComponentGraphConfig;
+    use crate::InverterType;
     use crate::component_category::BatteryType;
     use crate::component_category::CategoryPredicates;
     use crate::error::Error;
     use crate::graph::test_utils::ComponentGraphBuilder;
     use crate::graph::test_utils::{TestComponent, TestConnection};
-    use crate::ComponentCategory;
-    use crate::ComponentGraphConfig;
-    use crate::InverterType;
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
@@ -232,10 +232,12 @@ mod tests {
 
         assert!(graph.connections().eq(&connections));
 
-        assert!(graph
-            .connections()
-            .filter(|x| x.source() == 2)
-            .eq(&[TestConnection::new(2, 3), TestConnection::new(2, 6)]));
+        assert!(
+            graph
+                .connections()
+                .filter(|x| x.source() == 2)
+                .eq(&[TestConnection::new(2, 3), TestConnection::new(2, 6)])
+        );
 
         Ok(())
     }
@@ -248,13 +250,17 @@ mod tests {
 
         assert!(graph.predecessors(1).is_ok_and(|x| x.eq(&[])));
 
-        assert!(graph
-            .predecessors(3)
-            .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)])));
+        assert!(
+            graph
+                .predecessors(3)
+                .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)]))
+        );
 
-        assert!(graph
-            .successors(1)
-            .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)])));
+        assert!(
+            graph
+                .successors(1)
+                .is_ok_and(|x| x.eq(&[TestComponent::new(2, ComponentCategory::Meter)]))
+        );
 
         assert!(graph.successors(2).is_ok_and(|x| {
             x.eq(&[
@@ -265,12 +271,16 @@ mod tests {
 
         assert!(graph.successors(5).is_ok_and(|x| x.eq(&[])));
 
-        assert!(graph
-            .predecessors(32)
-            .is_err_and(|e| e == Error::component_not_found("Component with id 32 not found.")));
-        assert!(graph
-            .successors(32)
-            .is_err_and(|e| e == Error::component_not_found("Component with id 32 not found.")));
+        assert!(
+            graph
+                .predecessors(32)
+                .is_err_and(|e| e == Error::component_not_found("Component with id 32 not found."))
+        );
+        assert!(
+            graph
+                .successors(32)
+                .is_err_and(|e| e == Error::component_not_found("Component with id 32 not found."))
+        );
 
         Ok(())
     }

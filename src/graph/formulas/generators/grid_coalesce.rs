@@ -5,7 +5,7 @@
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::CoalesceFormula;
-use crate::{graph::formulas::expr::Expr, ComponentGraph, Edge, Error, Node};
+use crate::{ComponentGraph, Edge, Error, Node, graph::formulas::expr::Expr};
 
 pub(crate) struct GridCoalesceFormulaBuilder<'a, N, E>
 where

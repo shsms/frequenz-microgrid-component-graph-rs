@@ -58,7 +58,7 @@ mod component_category;
 pub use component_category::{BatteryType, ComponentCategory, EvChargerType, InverterType};
 
 mod graph;
-pub use graph::{iterators, AggregationFormula, CoalesceFormula, ComponentGraph, Formula};
+pub use graph::{AggregationFormula, CoalesceFormula, ComponentGraph, Formula, iterators};
 
 mod graph_traits;
 pub use graph_traits::{Edge, Node};

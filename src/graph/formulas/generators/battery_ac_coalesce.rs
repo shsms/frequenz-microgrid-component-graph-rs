@@ -7,8 +7,8 @@ use crate::component_category::CategoryPredicates;
 use std::collections::BTreeSet;
 
 use crate::{
-    graph::formulas::{expr::Expr, CoalesceFormula},
     ComponentGraph, Edge, Error, Node,
+    graph::formulas::{CoalesceFormula, expr::Expr},
 };
 
 use super::battery::BatteryFormulaBuilder;
@@ -83,7 +83,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        graph::test_utils::ComponentGraphBuilder, ComponentGraphConfig, Error, InverterType,
+        ComponentGraphConfig, Error, InverterType, graph::test_utils::ComponentGraphBuilder,
     };
 
     #[test]
@@ -184,10 +184,10 @@ mod tests {
 
         assert_eq!(unspec_inverter.component_id(), 20);
 
-        assert!(builder
-            .build(None)
-            .is_err_and(|x| x.to_string()
-                == "InvalidComponent: InverterType not specified for inverter: 20"));
+        assert!(
+            builder.build(None).is_err_and(|x| x.to_string()
+                == "InvalidComponent: InverterType not specified for inverter: 20")
+        );
 
         let graph = builder.build(Some(ComponentGraphConfig {
             allow_unspecified_inverters: true,

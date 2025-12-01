@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::AggregationFormula;
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::FallbackExpr;
-use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct CHPFormulaBuilder<'a, N, E>
@@ -72,7 +72,7 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{graph::test_utils::ComponentGraphBuilder, Error};
+    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
 
     #[test]
     fn test_chp_formula() -> Result<(), Error> {

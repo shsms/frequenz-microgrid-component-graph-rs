@@ -180,8 +180,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        graph::{formulas::fallback::FallbackExpr, test_utils::ComponentGraphBuilder},
         ComponentGraphConfig, Error,
+        graph::{formulas::fallback::FallbackExpr, test_utils::ComponentGraphBuilder},
     };
 
     #[test]

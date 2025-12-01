@@ -1,7 +1,7 @@
 // License: MIT
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
-use crate::{component_category::CategoryPredicates, ComponentGraph, Edge, Error, Node};
+use crate::{ComponentGraph, Edge, Error, Node, component_category::CategoryPredicates};
 
 impl<N, E> ComponentGraph<N, E>
 where

@@ -7,8 +7,8 @@ use crate::component_category::CategoryPredicates;
 use std::collections::BTreeSet;
 
 use crate::{
-    graph::formulas::{expr::Expr, CoalesceFormula},
     ComponentGraph, Edge, Error, Node,
+    graph::formulas::{CoalesceFormula, expr::Expr},
 };
 
 pub(crate) struct PVAcCoalesceFormulaBuilder<'a, N, E>
@@ -86,7 +86,7 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{graph::test_utils::ComponentGraphBuilder, Error};
+    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
 
     #[test]
     fn test_pv_ac_coalesce_formula() -> Result<(), Error> {
