@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
+use crate::graph::formulas::AggregationFormula;
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::FallbackExpr;
-use crate::graph::formulas::AggregationFormula;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct BatteryFormulaBuilder<'a, N, E>
@@ -97,7 +97,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        graph::test_utils::ComponentGraphBuilder, ComponentGraphConfig, Error, InverterType,
+        ComponentGraphConfig, Error, InverterType, graph::test_utils::ComponentGraphBuilder,
     };
 
     #[test]
@@ -208,10 +208,10 @@ mod tests {
 
         assert_eq!(unspec_inverter.component_id(), 20);
 
-        assert!(builder
-            .build(None)
-            .is_err_and(|x| x.to_string()
-                == "InvalidComponent: InverterType not specified for inverter: 20"));
+        assert!(
+            builder.build(None).is_err_and(|x| x.to_string()
+                == "InvalidComponent: InverterType not specified for inverter: 20")
+        );
 
         let graph = builder.build(Some(ComponentGraphConfig {
             allow_unspecified_inverters: true,

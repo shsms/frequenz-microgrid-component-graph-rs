@@ -5,7 +5,7 @@
 //! connected correctly.
 
 use crate::{
-    component_category::CategoryPredicates, ComponentCategory, Edge, Error, InverterType, Node,
+    ComponentCategory, Edge, Error, InverterType, Node, component_category::CategoryPredicates,
 };
 
 use super::ComponentGraphValidator;
@@ -149,13 +149,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component_category::BatteryType;
-    use crate::component_category::EvChargerType;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::ComponentGraphConfig;
     use crate::InverterType;
+    use crate::component_category::BatteryType;
+    use crate::component_category::EvChargerType;
+    use crate::graph::test_utils::{TestComponent, TestConnection};
 
     #[test]
     fn test_validate_root() {
@@ -289,15 +289,17 @@ r#"InvalidGraph: Multiple validation failures:
                 }),
         );
         // With `allow_component_validation_failures=true`, this would pass.
-        assert!(ComponentGraph::try_new(
-            components.clone(),
-            connections.clone(),
-            ComponentGraphConfig {
-                allow_component_validation_failures: true,
-                ..config.clone()
-            }
-        )
-        .is_ok());
+        assert!(
+            ComponentGraph::try_new(
+                components.clone(),
+                connections.clone(),
+                ComponentGraphConfig {
+                    allow_component_validation_failures: true,
+                    ..config.clone()
+                }
+            )
+            .is_ok()
+        );
 
         components.pop();
         connections.pop();

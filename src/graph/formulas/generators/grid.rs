@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    graph::formulas::{expr::Expr, fallback::FallbackExpr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
+    graph::formulas::{AggregationFormula, expr::Expr, fallback::FallbackExpr},
 };
 
 pub(crate) struct GridFormulaBuilder<'a, N, E>

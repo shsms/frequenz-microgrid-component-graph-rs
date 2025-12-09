@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::expr::Expr;
 use crate::{
-    component_category::CategoryPredicates,
-    graph::formulas::{fallback::FallbackExpr, AggregationFormula},
     ComponentGraph, Edge, Error, Node,
+    component_category::CategoryPredicates,
+    graph::formulas::{AggregationFormula, fallback::FallbackExpr},
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -126,7 +126,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{graph::test_utils::ComponentGraphBuilder, ComponentGraphConfig};
+    use crate::{ComponentGraphConfig, graph::test_utils::ComponentGraphBuilder};
 
     #[test]
     fn test_zero_consumers() -> Result<(), Error> {

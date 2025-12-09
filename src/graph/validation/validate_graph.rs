@@ -81,12 +81,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component_category::BatteryType;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::ComponentGraphConfig;
     use crate::InverterType;
+    use crate::component_category::BatteryType;
+    use crate::graph::test_utils::{TestComponent, TestConnection};
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
@@ -158,15 +158,17 @@ mod tests {
                 )
         );
         // With `allow_unconnected_components=true`, this passes validation.
-        assert!(ComponentGraph::try_new(
-            components.clone(),
-            connections.clone(),
-            ComponentGraphConfig {
-                allow_unconnected_components: true,
-                ..config.clone()
-            }
-        )
-        .is_ok());
+        assert!(
+            ComponentGraph::try_new(
+                components.clone(),
+                connections.clone(),
+                ComponentGraphConfig {
+                    allow_unconnected_components: true,
+                    ..config.clone()
+                }
+            )
+            .is_ok()
+        );
 
         connections.pop();
         components.pop();

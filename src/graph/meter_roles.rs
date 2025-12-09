@@ -3,7 +3,7 @@
 
 //! Methods for checking the roles of meters in a [`ComponentGraph`].
 
-use crate::{component_category::CategoryPredicates, ComponentGraph, Edge, Error, Node};
+use crate::{ComponentGraph, Edge, Error, Node, component_category::CategoryPredicates};
 
 /// Meter role identification.
 impl<N, E> ComponentGraph<N, E>
@@ -89,13 +89,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ComponentCategory;
+    use crate::ComponentGraphConfig;
+    use crate::InverterType;
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
     use crate::error::Error;
     use crate::graph::test_utils::{TestComponent, TestConnection};
-    use crate::ComponentCategory;
-    use crate::ComponentGraphConfig;
-    use crate::InverterType;
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![

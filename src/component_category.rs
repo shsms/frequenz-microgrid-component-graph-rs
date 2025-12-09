@@ -4,8 +4,8 @@
 //! This module defines the `ComponentCategory` enum, which represents the
 //! category of a component.
 
-use crate::graph_traits::Node;
 use crate::ComponentGraphConfig;
+use crate::graph_traits::Node;
 use std::fmt::Display;
 
 /// Represents the type of an inverter.
