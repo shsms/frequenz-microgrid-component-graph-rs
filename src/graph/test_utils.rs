@@ -2,7 +2,7 @@
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
 //! This module is only compiled when running unit tests and contains features
-//! that are shared by all tests of the `graph` modue.
+//! that are shared by all tests of the `graph` module.
 //!
 //! - the `TestComponent` and `TestConnection` types, which implement the `Node`
 //!   and `Edge` traits respectively.
@@ -150,6 +150,11 @@ impl ComponentGraphBuilder {
         self.add_component(ComponentCategory::Chp)
     }
 
+    /// Adds a wind_turbine to the graph and returns its handle.
+    pub(super) fn wind_turbine(&mut self) -> ComponentHandle {
+        self.add_component(ComponentCategory::WindTurbine)
+    }
+
     /// Connects two components in the graph.
     pub(super) fn connect(&mut self, from: ComponentHandle, to: ComponentHandle) -> &mut Self {
         self.connections
@@ -222,6 +227,17 @@ impl ComponentGraphBuilder {
         for _ in 0..num_ev_chargers {
             let ev_charger = self.ev_charger();
             self.connect(meter, ev_charger);
+        }
+        meter
+    }
+
+    /// Adds a meter, followed by the given number of wind turbines, and
+    /// returns a handle to the meter.
+    pub(super) fn meter_wind_turbine_chain(&mut self, num_wind_turbines: usize) -> ComponentHandle {
+        let meter = self.meter();
+        for _ in 0..num_wind_turbines {
+            let wind_turbine = self.wind_turbine();
+            self.connect(meter, wind_turbine);
         }
         meter
     }
