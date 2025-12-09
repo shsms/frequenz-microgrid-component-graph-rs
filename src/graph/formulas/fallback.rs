@@ -114,6 +114,7 @@ impl FallbackExpr {
     /// - Battery Inverter
     /// - PV Inverter
     /// - EV Charger
+    /// - Wind Turbine
     fn component_fallback<N: Node, E: Edge>(
         &self,
         graph: &ComponentGraph<N, E>,
@@ -125,6 +126,7 @@ impl FallbackExpr {
             && !component.is_chp()
             && !component.is_pv_inverter()
             && !component.is_ev_charger()
+            && !component.is_wind_turbine()
         {
             return Ok(None);
         }

@@ -64,6 +64,15 @@ where
         generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
     }
 
+    /// Returns the wind_turbine formula for the graph.
+    pub fn wind_turbine_formula(
+        &self,
+        wind_turbine_ids: Option<BTreeSet<u64>>,
+    ) -> Result<AggregationFormula, Error> {
+        generators::wind_turbine::WindTurbineFormulaBuilder::try_new(self, wind_turbine_ids)?
+            .build()
+    }
+
     /// Returns the EV charger formula for the graph.
     pub fn ev_charger_formula(
         &self,

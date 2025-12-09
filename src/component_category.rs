@@ -180,6 +180,10 @@ pub(crate) trait CategoryPredicates: Node {
     fn is_chp(&self) -> bool {
         self.category() == ComponentCategory::Chp
     }
+
+    fn is_wind_turbine(&self) -> bool {
+        self.category() == ComponentCategory::WindTurbine
+    }
 }
 
 /// Implement the `CategoryPredicates` trait for all types that implement the
