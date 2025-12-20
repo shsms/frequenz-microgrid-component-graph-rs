@@ -101,6 +101,21 @@ impl FallbackExpr {
             return Ok(Some(Expr::component(component_id)));
         }
 
+        // If a meter fallback for a meter exists, make sure it is not a component meter.
+        if self.meter_fallback_for_meters && has_successor_meters {
+            // we've already established that if there are successor meters,
+            // then there's only one successor.
+            let successor = graph
+                .successors(component_id)?
+                .find(|node| node.is_meter())
+                .ok_or(Error::internal(
+                    "Can't find successor meter of component with successor meters.",
+                ))?;
+            if graph.is_component_meter(successor.component_id())? {
+                return Ok(Some(Expr::component(component_id)));
+            }
+        }
+
         let mut coalesced = Expr::component(component_id);
 
         if !self.prefer_meters {
@@ -224,13 +239,13 @@ mod tests {
             .prefer_meters(true)
             .meter_fallback_for_meters(true)
             .generate(&graph, BTreeSet::from([1]))?;
-        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+        assert_eq!(expr.to_string(), "#1");
 
         let expr = FallbackExpr::new()
             .prefer_meters(true)
             .meter_fallback_for_meters(true)
             .generate(&graph, BTreeSet::from([1, 2]))?;
-        assert_eq!(expr.to_string(), "COALESCE(#1, #2) + COALESCE(#2, #3, 0.0)");
+        assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
 
         let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2, 0.0)");
@@ -393,5 +408,31 @@ mod tests {
         let graph = builder.build(None).unwrap();
         let expr = graph.pv_formula(None).unwrap().to_string();
         assert_eq!(expr, "COALESCE(#1, 0.0) + COALESCE(#2, 0.0)");
+    }
+
+    /// Test meters with meter fallback
+    #[test]
+    fn test_meters_with_meter_fallback() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let meter1 = builder.meter();
+        let meter2 = builder.meter();
+        let bat_chain = builder.meter_bat_chain(1, 1);
+        let pv_chain = builder.meter_pv_chain(1);
+
+        builder.connect(grid, meter1);
+        builder.connect(meter1, meter2);
+        builder.connect(meter2, bat_chain);
+        builder.connect(meter2, pv_chain);
+
+        let graph = builder.build(None)?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([meter1.component_id()]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+
+        Ok(())
     }
 }
