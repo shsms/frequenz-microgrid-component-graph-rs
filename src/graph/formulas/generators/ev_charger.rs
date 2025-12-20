@@ -63,7 +63,7 @@ where
         }
 
         FallbackExpr {
-            prefer_meters: false,
+            prefer_meters: !self.graph.config.prefer_ev_chargers_in_ev_formula,
             meter_fallback_for_meters: false,
         }
         .generate(self.graph, self.ev_charger_ids.clone())
@@ -85,7 +85,12 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build(None)?;
+        let prefer_ev_charger_config = Some(crate::ComponentGraphConfig {
+            prefer_ev_chargers_in_ev_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(prefer_ev_charger_config.clone())?;
         let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
@@ -96,7 +101,7 @@ mod tests {
         assert_eq!(grid_meter.component_id(), 1);
         assert_eq!(meter_ev_charger_chain.component_id(), 2);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_ev_charger_config.clone())?;
         let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
@@ -106,7 +111,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 4);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_ev_charger_config.clone())?;
         let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
@@ -116,7 +121,7 @@ mod tests {
 
         assert_eq!(meter_ev_charger_chain.component_id(), 8);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_ev_charger_config.clone())?;
         let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -137,7 +142,9 @@ mod tests {
 
         assert_eq!(meter_ev_charger_chain.component_id(), 11);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_ev_charger_config)?;
+        let graph_prefer_meters = builder.build(None)?;
+
         let formula = graph.ev_charger_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -146,6 +153,18 @@ mod tests {
                 "COALESCE(#10 + #9, #8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
                 "COALESCE(",
                 "#14 + #13 + #12, ",
+                "#11, ",
+                "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
+                ")"
+            ),
+        );
+        let formula = graph_prefer_meters.ev_charger_formula(None)?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(",
                 "#11, ",
                 "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
                 ")"
@@ -160,6 +179,18 @@ mod tests {
             concat!(
                 "COALESCE(#3, #2, 0.0) + ",
                 "COALESCE(#10 + #9, #8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(#12, 0.0) + ",
+                "COALESCE(#13, 0.0)"
+            )
+        );
+        let formula = graph_prefer_meters
+            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
                 "COALESCE(#12, 0.0) + ",
                 "COALESCE(#13, 0.0)"
             )
@@ -180,14 +211,37 @@ mod tests {
                 ")"
             )
         );
+        let formula = graph_prefer_meters
+            .ev_charger_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(",
+                "#11, ",
+                "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
+                ")"
+            )
+        );
 
         let formula = graph
+            .ev_charger_formula(Some(BTreeSet::from([10, 14])))?
+            .to_string();
+        assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
+        let formula = graph_prefer_meters
             .ev_charger_formula(Some(BTreeSet::from([10, 14])))?
             .to_string();
         assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
 
         // Failure cases:
         let formula = graph.ev_charger_formula(Some(BTreeSet::from([8])));
+        assert_eq!(
+            formula.unwrap_err().to_string(),
+            "InvalidComponent: Component with id 8 is not an EV charger."
+        );
+        let formula = graph_prefer_meters.ev_charger_formula(Some(BTreeSet::from([8])));
         assert_eq!(
             formula.unwrap_err().to_string(),
             "InvalidComponent: Component with id 8 is not an EV charger."
