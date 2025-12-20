@@ -60,7 +60,7 @@ where
         }
 
         FallbackExpr {
-            prefer_meters: false,
+            prefer_meters: !self.graph.config.prefer_chp_in_chp_formula,
             meter_fallback_for_meters: false,
         }
         .generate(self.graph, self.chp_ids.clone())
@@ -72,7 +72,7 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
+    use crate::{ComponentGraphConfig, Error, graph::test_utils::ComponentGraphBuilder};
 
     #[test]
     fn test_chp_formula() -> Result<(), Error> {
@@ -82,7 +82,12 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build(None)?;
+        let prefer_chp_config = Some(ComponentGraphConfig {
+            prefer_chp_in_chp_formula: true,
+            ..ComponentGraphConfig::default()
+        });
+
+        let graph = builder.build(prefer_chp_config.clone())?;
         let formula = graph.chp_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
@@ -93,7 +98,7 @@ mod tests {
         assert_eq!(grid_meter.component_id(), 1);
         assert_eq!(meter_chp_chain.component_id(), 2);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_chp_config.clone())?;
         let formula = graph.chp_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
@@ -103,7 +108,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 4);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_chp_config.clone())?;
         let formula = graph.chp_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
@@ -113,7 +118,7 @@ mod tests {
 
         assert_eq!(meter_chp_chain.component_id(), 8);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_chp_config.clone())?;
         let formula = graph.chp_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -134,7 +139,9 @@ mod tests {
 
         assert_eq!(meter_chp_chain.component_id(), 11);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_chp_config)?;
+        let graph_prefer_meters = builder.build(None)?;
+
         let formula = graph.chp_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -143,6 +150,18 @@ mod tests {
                 "COALESCE(#10 + #9, #8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
                 "COALESCE(",
                 "#14 + #13 + #12, ",
+                "#11, ",
+                "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
+                ")"
+            ),
+        );
+        let formula = graph_prefer_meters.chp_formula(None)?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(",
                 "#11, ",
                 "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
                 ")"
@@ -157,6 +176,17 @@ mod tests {
             concat!(
                 "COALESCE(#3, #2, 0.0) + ",
                 "COALESCE(#10 + #9, #8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(#12, 0.0) + COALESCE(#13, 0.0)"
+            )
+        );
+        let formula = graph_prefer_meters
+            .chp_formula(Some(BTreeSet::from([3, 9, 10, 12, 13])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
                 "COALESCE(#12, 0.0) + COALESCE(#13, 0.0)"
             )
         );
@@ -176,14 +206,37 @@ mod tests {
                 ")"
             ),
         );
+        let formula = graph_prefer_meters
+            .chp_formula(Some(BTreeSet::from([3, 9, 10, 12, 13, 14])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#8, COALESCE(#10, 0.0) + COALESCE(#9, 0.0)) + ",
+                "COALESCE(",
+                "#11, ",
+                "COALESCE(#14, 0.0) + COALESCE(#13, 0.0) + COALESCE(#12, 0.0)",
+                ")"
+            ),
+        );
 
         let formula = graph
+            .chp_formula(Some(BTreeSet::from([10, 14])))?
+            .to_string();
+        assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
+        let formula = graph_prefer_meters
             .chp_formula(Some(BTreeSet::from([10, 14])))?
             .to_string();
         assert_eq!(formula, "COALESCE(#10, 0.0) + COALESCE(#14, 0.0)");
 
         // Failure cases:
         let formula = graph.chp_formula(Some(BTreeSet::from([8])));
+        assert_eq!(
+            formula.unwrap_err().to_string(),
+            "InvalidComponent: Component with id 8 is not a CHP."
+        );
+        let formula = graph_prefer_meters.chp_formula(Some(BTreeSet::from([8])));
         assert_eq!(
             formula.unwrap_err().to_string(),
             "InvalidComponent: Component with id 8 is not a CHP."

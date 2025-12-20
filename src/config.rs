@@ -34,6 +34,11 @@ pub struct ComponentGraphConfig {
     /// battery meters will be secondary.  When `false`, battery meters will be
     /// the primary source.
     pub prefer_inverters_in_battery_formula: bool,
+
+    /// Whether to prefer CHP when generating CHP formulas.  When this is
+    /// `true`, CHP units will be the primary source and CHP meters will be
+    /// secondary.  When `false`, CHP meters will be the primary source.
+    pub prefer_chp_in_chp_formula: bool,
     /// Whether to prefer wind turbines when generating Wind formulas.  When
     /// this is `true`, wind turbines will be the primary source and wind meters
     /// will be secondary.  When `false`, wind meters will be the primary
