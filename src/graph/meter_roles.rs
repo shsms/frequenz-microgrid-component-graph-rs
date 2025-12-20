@@ -101,6 +101,76 @@ where
             || self.is_chp_meter(component_id)?
             || self.is_wind_turbine_meter(component_id)?)
     }
+
+    /// Returns true if the node is part of a battery chain.
+    ///
+    /// A component is part of a battery chain if it is one of the following:
+    ///  - a battery meter,
+    ///  - a battery inverter,
+    ///  - a battery.
+    pub fn is_battery_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_battery_meter(component_id)? || {
+            let component = self.component(component_id)?;
+            component.is_battery() || component.is_battery_inverter(&self.config)
+        })
+    }
+
+    /// Returns true if the node is part of a PV chain.
+    ///
+    /// A component is part of a PV chain if it is one of the following:
+    ///  - a PV meter,
+    ///  - a PV inverter.
+    pub fn is_pv_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_pv_meter(component_id)? || self.component(component_id)?.is_pv_inverter())
+    }
+
+    /// Returns true if the node is part of a CHP chain.
+    ///
+    /// A component is part of a CHP chain if it is one of the following:
+    ///  - a CHP meter,
+    ///  - a CHP.
+    pub fn is_chp_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_chp_meter(component_id)? || self.component(component_id)?.is_chp())
+    }
+
+    /// Returns true if the node is part of an EV charger chain.
+    ///
+    /// A component is part of an EV charger chain if it is one of the following:
+    ///  - an EV charger meter,
+    ///  - an EV charger.
+    pub fn is_ev_charger_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(
+            self.is_ev_charger_meter(component_id)?
+                || self.component(component_id)?.is_ev_charger(),
+        )
+    }
+
+    /// Returns true if the node is part of a Wind Turbine chain.
+    ///
+    /// A component is part of a Wind Turbine chain if it is one of the following:
+    /// - a Wind Turbine meter,
+    /// - a Wind Turbine.
+    pub fn is_wind_turbine_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_wind_turbine_meter(component_id)?
+            || self.component(component_id)?.is_wind_turbine())
+    }
+
+    /// Returns true if the node is part of a component chain.
+    ///
+    /// A component is part of a component chain if it is part of one of the
+    /// following:
+    ///  - a battery chain,
+    ///  - a PV chain,
+    ///  - an EV charger chain,
+    ///  - a CHP chain,
+    ///  - a Wind Turbine chain.
+    pub fn is_component_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_battery_chain(component_id)?
+            || self.is_pv_chain(component_id)?
+            || self.is_ev_charger_chain(component_id)?
+            || self.is_chp_chain(component_id)?
+            || self.is_wind_turbine_chain(component_id)?)
+    }
 }
 
 #[cfg(test)]
