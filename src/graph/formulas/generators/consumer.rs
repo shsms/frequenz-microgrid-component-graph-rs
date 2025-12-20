@@ -107,7 +107,7 @@ where
 
             expr = expr.max(Expr::number(0.0));
 
-            // If the meter doesn't have any meter successors, its consumption
+            // If the meter only has non-meter successors, its consumption
             // can be 0 when it can't be calculated.
             if self.graph.has_successors(component_id)?
                 && !self.graph.has_meter_successors(component_id)?
