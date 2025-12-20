@@ -23,4 +23,9 @@ pub struct ComponentGraphConfig {
     /// Whether to disable fallback components in generated formulas.  When this
     /// is `true`, the formulas will not include fallback components.
     pub disable_fallback_components: bool,
+
+    /// Whether to prefer PV inverters when generating PV formulas.  When this
+    /// is `true`, PV inverters will be the primary source and PV meters will be
+    /// the fallback.  When `false`, PV meters will be the primary source.
+    pub prefer_inverters_in_pv_formula: bool,
 }
