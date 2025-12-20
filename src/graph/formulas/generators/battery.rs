@@ -55,12 +55,10 @@ where
             return Ok(AggregationFormula::new(Expr::number(0.0)));
         }
 
-        FallbackExpr {
-            prefer_meters: !self.graph.config.prefer_inverters_in_battery_formula,
-            meter_fallback_for_meters: false,
-        }
-        .generate(self.graph, self.inverter_ids.clone())
-        .map(AggregationFormula::new)
+        FallbackExpr::new()
+            .prefer_meters(!self.graph.config.prefer_inverters_in_battery_formula)
+            .generate(self.graph, self.inverter_ids.clone())
+            .map(AggregationFormula::new)
     }
 
     pub(super) fn find_inverter_ids(

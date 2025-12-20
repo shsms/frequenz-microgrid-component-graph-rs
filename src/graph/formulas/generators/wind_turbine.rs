@@ -62,12 +62,10 @@ where
             }
         }
 
-        FallbackExpr {
-            prefer_meters: !self.graph.config.prefer_wind_turbines_in_wind_formula,
-            meter_fallback_for_meters: false,
-        }
-        .generate(self.graph, self.wind_turbine_ids.clone())
-        .map(AggregationFormula::new)
+        FallbackExpr::new()
+            .prefer_meters(!self.graph.config.prefer_wind_turbines_in_wind_formula)
+            .generate(self.graph, self.wind_turbine_ids.clone())
+            .map(AggregationFormula::new)
     }
 }
 

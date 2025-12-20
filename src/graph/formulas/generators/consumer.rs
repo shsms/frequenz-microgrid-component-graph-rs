@@ -96,11 +96,9 @@ where
             // Subtract each successor from the expression.
             for successor in successors {
                 let successor_expr = if successor.1.is_meter() {
-                    FallbackExpr {
-                        prefer_meters: true,
-                        meter_fallback_for_meters: false,
-                    }
-                    .generate(self.graph, BTreeSet::from([successor.0]))?
+                    FallbackExpr::new()
+                        .prefer_meters(true)
+                        .generate(self.graph, BTreeSet::from([successor.0]))?
                 } else {
                     Expr::from(successor.1)
                 };

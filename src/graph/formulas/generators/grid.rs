@@ -35,11 +35,10 @@ where
     pub fn build(self) -> Result<AggregationFormula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = FallbackExpr {
-                prefer_meters: true,
-                meter_fallback_for_meters: true,
-            }
-            .generate(self.graph, BTreeSet::from([comp.component_id()]))?;
+            let comp = FallbackExpr::new()
+                .prefer_meters(true)
+                .meter_fallback_for_meters(true)
+                .generate(self.graph, BTreeSet::from([comp.component_id()]))?;
             expr = match expr {
                 None => Some(comp),
                 Some(e) => Some(comp + e),
