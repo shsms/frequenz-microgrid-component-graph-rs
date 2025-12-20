@@ -56,7 +56,7 @@ where
         }
 
         FallbackExpr {
-            prefer_meters: false,
+            prefer_meters: !self.graph.config.prefer_inverters_in_battery_formula,
             meter_fallback_for_meters: false,
         }
         .generate(self.graph, self.inverter_ids.clone())
@@ -108,7 +108,12 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build(None)?;
+        let prefer_inverters_config = Some(ComponentGraphConfig {
+            prefer_inverters_in_battery_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
@@ -119,7 +124,7 @@ mod tests {
         assert_eq!(grid_meter.component_id(), 1);
         assert_eq!(meter_bat_chain.component_id(), 2);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
@@ -129,7 +134,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 5);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0) + COALESCE(#6, #5, 0.0)");
 
@@ -154,7 +159,7 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 9);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -179,7 +184,8 @@ mod tests {
 
         assert_eq!(meter_pv_chain.component_id(), 14);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(prefer_inverters_config)?;
+        let graph_prefer_meters = builder.build(None)?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -187,6 +193,15 @@ mod tests {
                 "COALESCE(#3, #2, 0.0) + ",
                 "COALESCE(#6, #5, 0.0) + ",
                 "COALESCE(#11 + #10, #9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0))"
+            )
+        );
+        let formula = graph_prefer_meters.battery_formula(None)?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#5, #6, 0.0) + ",
+                "COALESCE(#9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0))"
             )
         );
 
@@ -215,6 +230,11 @@ mod tests {
 
         let graph = builder.build(Some(ComponentGraphConfig {
             allow_unspecified_inverters: true,
+            prefer_inverters_in_battery_formula: true,
+            ..Default::default()
+        }))?;
+        let graph_prefer_meters = builder.build(Some(ComponentGraphConfig {
+            allow_unspecified_inverters: true,
             ..Default::default()
         }))?;
         let formula = graph.battery_formula(None)?.to_string();
@@ -227,6 +247,16 @@ mod tests {
                 "COALESCE(#20 + #18, #17, COALESCE(#20, 0.0) + COALESCE(#18, 0.0))"
             )
         );
+        let formula = graph_prefer_meters.battery_formula(None)?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#5, #6, 0.0) + ",
+                "COALESCE(#9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0)) + ",
+                "COALESCE(#17, COALESCE(#20, 0.0) + COALESCE(#18, 0.0))"
+            )
+        );
 
         let formula = graph
             .battery_formula(Some(BTreeSet::from([19, 21])))?
@@ -235,13 +265,28 @@ mod tests {
             formula,
             "COALESCE(#20 + #18, #17, COALESCE(#20, 0.0) + COALESCE(#18, 0.0))"
         );
+        let formula = graph_prefer_meters
+            .battery_formula(Some(BTreeSet::from([19, 21])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            "COALESCE(#17, COALESCE(#20, 0.0) + COALESCE(#18, 0.0))"
+        );
 
         let formula = graph
             .battery_formula(Some(BTreeSet::from([19])))?
             .to_string();
         assert_eq!(formula, "COALESCE(#18, 0.0)");
+        let formula = graph_prefer_meters
+            .battery_formula(Some(BTreeSet::from([19])))?
+            .to_string();
+        assert_eq!(formula, "COALESCE(#18, 0.0)");
 
         let formula = graph
+            .battery_formula(Some(BTreeSet::from([21])))?
+            .to_string();
+        assert_eq!(formula, "COALESCE(#20, 0.0)");
+        let formula = graph_prefer_meters
             .battery_formula(Some(BTreeSet::from([21])))?
             .to_string();
         assert_eq!(formula, "COALESCE(#20, 0.0)");
@@ -257,6 +302,17 @@ mod tests {
                 "COALESCE(#18, 0.0)"
             )
         );
+        let formula = graph_prefer_meters
+            .battery_formula(Some(BTreeSet::from([4, 12, 13, 19])))?
+            .to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0)) + ",
+                "COALESCE(#18, 0.0)"
+            )
+        );
 
         // Failure cases:
         let formula = graph.battery_formula(Some(BTreeSet::from([17])));
@@ -264,8 +320,18 @@ mod tests {
             formula.unwrap_err().to_string(),
             "InvalidComponent: Component with id 17 is not a battery."
         );
+        let formula = graph_prefer_meters.battery_formula(Some(BTreeSet::from([17])));
+        assert_eq!(
+            formula.unwrap_err().to_string(),
+            "InvalidComponent: Component with id 17 is not a battery."
+        );
 
         let formula = graph.battery_formula(Some(BTreeSet::from([12])));
+        assert_eq!(
+            formula.unwrap_err().to_string(),
+            "InvalidComponent: Battery 12 can't be in a formula without all its siblings: [13]."
+        );
+        let formula = graph_prefer_meters.battery_formula(Some(BTreeSet::from([12])));
         assert_eq!(
             formula.unwrap_err().to_string(),
             "InvalidComponent: Battery 12 can't be in a formula without all its siblings: [13]."

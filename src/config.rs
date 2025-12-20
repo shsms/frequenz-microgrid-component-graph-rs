@@ -29,6 +29,11 @@ pub struct ComponentGraphConfig {
     /// the fallback.  When `false`, PV meters will be the primary source.
     pub prefer_inverters_in_pv_formula: bool,
 
+    /// Whether to prefer battery inverters when generating Battery formulas.
+    /// When this is `true`, battery inverters will be the primary source and
+    /// battery meters will be secondary.  When `false`, battery meters will be
+    /// the primary source.
+    pub prefer_inverters_in_battery_formula: bool,
     /// Whether to prefer wind turbines when generating Wind formulas.  When
     /// this is `true`, wind turbines will be the primary source and wind meters
     /// will be secondary.  When `false`, wind meters will be the primary
