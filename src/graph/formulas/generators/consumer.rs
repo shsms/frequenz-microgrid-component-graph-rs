@@ -9,7 +9,9 @@ use super::super::expr::Expr;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     component_category::CategoryPredicates,
-    graph::formulas::{AggregationFormula, fallback::FallbackExpr},
+    graph::formulas::{
+        AggregationFormula, fallback::FallbackExpr, generators::grid::GridFormulaBuilder,
+    },
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -19,6 +21,31 @@ where
 {
     unvisited_meters: BTreeSet<u64>,
     graph: &'a ComponentGraph<N, E>,
+}
+
+/// Returns true if the node is a grid meter.
+///
+/// A given component is identified as a grid meter if:
+///  - its predecessor is the grid connection point,
+///  - it is a meter,
+///  - it is not a component meter (battery meter, pv meter, etc.).
+fn is_grid_meter<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    component: &N,
+) -> Result<bool, Error> {
+    if let Some(predecessor) = graph.predecessors(component.component_id())?.next() {
+        let sibling_count = graph
+            .siblings_from_predecessors(component.component_id())?
+            .count();
+
+        let is_fallback_grid_meter = is_grid_meter(graph, &predecessor)? && sibling_count == 0;
+
+        Ok((predecessor.is_grid() || is_fallback_grid_meter)
+            && component.is_meter()
+            && !graph.is_component_meter(component.component_id())?)
+    } else {
+        Ok(false)
+    }
 }
 
 impl<'a, N, E> ConsumerFormulaBuilder<'a, N, E>
@@ -40,6 +67,9 @@ where
 
     /// Generates the consumer formula for the given node.
     pub fn build(mut self) -> Result<AggregationFormula, Error> {
+        if !self.graph.config.include_phantom_loads_in_consumer_formula {
+            return self.build_without_phantom_loads();
+        }
         let mut all_meters = None;
         while let Some(meter_id) = self.unvisited_meters.pop_first() {
             let consumption = self.component_consumption(meter_id)?;
@@ -119,6 +149,83 @@ where
             Ok(Expr::from(component).max(Expr::number(0.0)))
         }
     }
+
+    fn build_without_phantom_loads(&self) -> Result<AggregationFormula, Error> {
+        let grid_successors = self
+            .graph
+            .successors(self.graph.root_id)?
+            .collect::<Vec<_>>();
+
+        if grid_successors.is_empty() {
+            return Ok(AggregationFormula::new(Expr::number(0.0)));
+        }
+
+        if grid_successors
+            .iter()
+            .all(|s| is_grid_meter(self.graph, s).unwrap_or(false))
+        {
+            self.build_with_grid_meter()
+        } else {
+            self.build_without_grid_meter()
+        }
+    }
+
+    fn build_with_grid_meter(&self) -> Result<AggregationFormula, Error> {
+        let non_consumer_components = self.graph.find_all(
+            self.graph.root_id,
+            |node| {
+                self.graph
+                    .is_component_chain(node.component_id())
+                    .unwrap_or(false)
+            },
+            petgraph::Direction::Outgoing,
+            false,
+        )?;
+        let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
+
+        for component_id in non_consumer_components {
+            if is_grid_meter(self.graph, self.graph.component(component_id)?)? {
+                continue;
+            }
+            let component_with_fallback = FallbackExpr::new()
+                .prefer_meters(true)
+                .generate(self.graph, BTreeSet::from([component_id]))?;
+
+            expr = expr - component_with_fallback;
+        }
+
+        Ok(AggregationFormula::new(expr.max(Expr::number(0.0))))
+    }
+
+    fn build_without_grid_meter(&self) -> Result<AggregationFormula, Error> {
+        let consumer_components = self.graph.find_all(
+            self.graph.root_id,
+            |node| {
+                node.is_meter()
+                    && !self
+                        .graph
+                        .is_component_meter(node.component_id())
+                        .unwrap_or(false)
+            },
+            petgraph::Direction::Outgoing,
+            false,
+        )?;
+
+        let mut expr = None;
+
+        for component_id in consumer_components {
+            let component = Expr::component(component_id);
+            expr = match expr {
+                None => Some(component),
+                Some(e) => Some(e + component),
+            };
+        }
+
+        Ok(AggregationFormula::new(
+            expr.map(|expr| expr.max(Expr::number(0.0)))
+                .unwrap_or_else(|| Expr::number(0.0)),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -151,8 +258,16 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(config)?;
+        let graph_no_phantom = builder.build(None)?;
         let formula = graph.consumer_formula()?.to_string();
+        assert_eq!(formula, "MAX(#1, 0.0)");
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(#1, 0.0)");
 
         // Add a battery meter with one battery inverter and one battery to the
@@ -162,7 +277,12 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 2);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts the battery meter from the grid meter, and the
         // battery inverter from the battery meter.
@@ -170,6 +290,9 @@ mod tests {
             formula,
             "MAX(#1 - COALESCE(#2, #3, 0.0), 0.0) + COALESCE(MAX(#2 - #3, 0.0), 0.0)"
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(formula, "MAX(#1 - COALESCE(#2, #3, 0.0), 0.0)");
 
         // Add a solar meter with two solar inverters to the grid meter.
         let meter_pv_chain = builder.meter_pv_chain(2);
@@ -177,7 +300,7 @@ mod tests {
 
         assert_eq!(meter_pv_chain.component_id(), 5);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -190,6 +313,17 @@ mod tests {
                 // difference of battery meter from battery inverter and pv
                 // meter from the two pv inverters.
                 "COALESCE(MAX(#2 - #3, 0.0), 0.0) + COALESCE(MAX(#5 - #6 - #7, 0.0), 0.0)",
+            )
+        );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "MAX(",
+                "#1 - COALESCE(#2, #3, 0.0) - COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)), ",
+                "0.0",
+                ")",
             )
         );
 
@@ -209,7 +343,7 @@ mod tests {
         assert_eq!(ev_charger.component_id(), 10);
         assert_eq!(meter.component_id(), 11);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -228,8 +362,24 @@ mod tests {
                 "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0)"
             )
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                // difference of grid meter from all non-consumer meters
+                "MAX(",
+                "#1 - ",
+                "COALESCE(#2, #3, 0.0) - ",
+                "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
+                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0), ",
+                "0.0)"
+            )
+        );
+
         let graph = builder.build(Some(ComponentGraphConfig {
             disable_fallback_components: true,
+            include_phantom_loads_in_consumer_formula: true,
             ..Default::default()
         }))?;
         let formula = graph.consumer_formula()?.to_string();
@@ -245,6 +395,13 @@ mod tests {
                 "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0)"
             )
         );
+        let graph_no_phantom = builder.build(Some(ComponentGraphConfig {
+            disable_fallback_components: true,
+            include_phantom_loads_in_consumer_formula: false,
+            ..Default::default()
+        }))?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(formula, concat!("MAX(#1 - #2 - #5 - #8 - #9 - #10, 0.0)"));
 
         // add a battery chain to the grid meter and a dangling meter to the grid.
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
@@ -255,7 +412,12 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 12);
         assert_eq!(dangling_meter.component_id(), 15);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -279,6 +441,22 @@ mod tests {
                 "MAX(#15, 0.0)"
             )
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                // difference of grid meter from all non-consumer meters, adding
+                // the dangling meter consumption.
+                "MAX(",
+                "#1 + #15 - ",
+                "COALESCE(#2, #3, 0.0) - ",
+                "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
+                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0) - ",
+                "COALESCE(#12, #13, 0.0), ",
+                "0.0)",
+            )
+        );
 
         Ok(())
     }
@@ -294,11 +472,19 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 1);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts inverter from battery meter, or shows zero
         // consumption if either of the components have no data.
         assert_eq!(formula, "COALESCE(MAX(#1 - #2, 0.0), 0.0)");
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        // The meter is treated as a battery meter, so its consumption is 0.
+        assert_eq!(formula, "0.0");
 
         // Add a pv meter with one solar inverter and two dangling meter.
         let meter_pv_chain = builder.meter_pv_chain(1);
@@ -312,7 +498,7 @@ mod tests {
         assert_eq!(dangling_meter_1.component_id(), 6);
         assert_eq!(dangling_meter_2.component_id(), 7);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -323,6 +509,9 @@ mod tests {
                 "MAX(#6, 0.0) + MAX(#7, 0.0)"
             )
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(formula, "MAX(#6 + #7, 0.0)");
 
         // Add a battery inverter to the grid, without a battery meter.
         //
@@ -331,7 +520,7 @@ mod tests {
         let inv_bat_chain = builder.inv_bat_chain(1);
         builder.connect(grid, inv_bat_chain);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -342,6 +531,9 @@ mod tests {
                 "MAX(#6, 0.0) + MAX(#7, 0.0)"
             )
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(formula, "MAX(#6 + #7, 0.0)");
 
         // Add a PV inverter and a CHP to the grid, without a meter.
         //
@@ -355,7 +547,7 @@ mod tests {
         assert_eq!(pv_inv.component_id(), 10);
         assert_eq!(chp.component_id(), 11);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -368,6 +560,9 @@ mod tests {
                 "MAX(#11, 0.0) + MAX(#10, 0.0)",
             )
         );
+        let graph_no_phantom = builder.build(None)?;
+        let formula = graph_no_phantom.consumer_formula()?.to_string();
+        assert_eq!(formula, "MAX(#6 + #7, 0.0)");
 
         Ok(())
     }
@@ -385,7 +580,12 @@ mod tests {
         builder.connect(grid, grid_meter_2);
         builder.connect(grid, grid_meter_3);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(#1, 0.0) + MAX(#2, 0.0) + MAX(#3, 0.0)");
 
@@ -400,7 +600,7 @@ mod tests {
         assert_eq!(meter_pv_chain_1.component_id(), 4);
         assert_eq!(meter_pv_chain_2.component_id(), 6);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -423,7 +623,11 @@ mod tests {
 
         assert_eq!(meter.component_id(), 8);
 
-        let graph = builder.build(None)?;
+        let config = Some(ComponentGraphConfig {
+            include_phantom_loads_in_consumer_formula: true,
+            ..Default::default()
+        });
+        let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -441,7 +645,7 @@ mod tests {
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
         builder.connect(grid_meter_1, meter_bat_chain);
 
-        let graph = builder.build(None)?;
+        let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,

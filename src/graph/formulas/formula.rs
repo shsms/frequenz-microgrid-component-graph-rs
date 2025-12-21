@@ -43,7 +43,7 @@ where
 // evaluator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationFormula {
-    expr: Expr,
+    pub(crate) expr: Expr,
 }
 
 impl From<Expr> for AggregationFormula {
