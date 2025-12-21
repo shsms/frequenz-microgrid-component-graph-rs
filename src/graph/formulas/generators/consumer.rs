@@ -38,7 +38,7 @@ fn is_grid_meter<N: Node, E: Edge>(
             .siblings_from_predecessors(component.component_id())?
             .count();
 
-        let is_fallback_grid_meter = is_grid_meter(graph, &predecessor)? && sibling_count == 0;
+        let is_fallback_grid_meter = is_grid_meter(graph, predecessor)? && sibling_count == 0;
 
         Ok((predecessor.is_grid() || is_fallback_grid_meter)
             && component.is_meter()
