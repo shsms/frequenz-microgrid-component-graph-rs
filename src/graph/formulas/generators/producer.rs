@@ -48,12 +48,9 @@ where
             petgraph::Direction::Outgoing,
             false,
         )? {
-            let comp_expr = FallbackExpr {
-                prefer_meters: false,
-                meter_fallback_for_meters: false,
-            }
-            .generate(self.graph, BTreeSet::from([component_id]))?
-            .min(Expr::number(0.0));
+            let comp_expr = FallbackExpr::new()
+                .generate(self.graph, BTreeSet::from([component_id]))?
+                .min(Expr::number(0.0));
             expr = match expr {
                 None => Some(comp_expr),
                 Some(e) => Some(e + comp_expr),

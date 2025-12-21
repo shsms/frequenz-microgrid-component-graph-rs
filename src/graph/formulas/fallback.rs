@@ -9,9 +9,26 @@ use std::collections::BTreeSet;
 
 use super::expr::Expr;
 
+#[derive(Default)]
 pub(crate) struct FallbackExpr {
-    pub(crate) prefer_meters: bool,
-    pub(crate) meter_fallback_for_meters: bool,
+    prefer_meters: bool,
+    meter_fallback_for_meters: bool,
+}
+
+impl FallbackExpr {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn prefer_meters(mut self, prefer: bool) -> Self {
+        self.prefer_meters = prefer;
+        self
+    }
+
+    pub fn meter_fallback_for_meters(mut self, enable: bool) -> Self {
+        self.meter_fallback_for_meters = enable;
+        self
+    }
 }
 
 impl FallbackExpr {
@@ -82,6 +99,21 @@ impl FallbackExpr {
         // we return the meter without fallback.
         if has_successor_meters && has_multiple_successors {
             return Ok(Some(Expr::component(component_id)));
+        }
+
+        // If a meter fallback for a meter exists, make sure it is not a component meter.
+        if self.meter_fallback_for_meters && has_successor_meters {
+            // we've already established that if there are successor meters,
+            // then there's only one successor.
+            let successor = graph
+                .successors(component_id)?
+                .find(|node| node.is_meter())
+                .ok_or(Error::internal(
+                    "Can't find successor meter of component with successor meters.",
+                ))?;
+            if graph.is_component_meter(successor.component_id())? {
+                return Ok(Some(Expr::component(component_id)));
+            }
         }
 
         let mut coalesced = Expr::component(component_id);
@@ -203,76 +235,56 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 2);
 
         let graph = builder.build(None)?;
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: true,
-        }
-        .generate(&graph, BTreeSet::from([1]))?;
-        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([1]))?;
+        assert_eq!(expr.to_string(), "#1");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: true,
-        }
-        .generate(&graph, BTreeSet::from([1, 2]))?;
-        assert_eq!(expr.to_string(), "COALESCE(#1, #2) + COALESCE(#2, #3, 0.0)");
-
-        let expr = FallbackExpr {
-            prefer_meters: false,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([1, 2]))?;
-        assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2, 0.0)");
-
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([1, 2]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([3]))?;
+        let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([1, 2]))?;
+        assert_eq!(expr.to_string(), "#1 + COALESCE(#3, #2, 0.0)");
+
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([1, 2]))?;
+        assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
+
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([3]))?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: true,
-        }
-        .generate(&graph, BTreeSet::from([3]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([3]))?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: true,
-        }
-        .generate(&graph, BTreeSet::from([2]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([2]))?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
 
         let graph = builder.build(Some(ComponentGraphConfig {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = FallbackExpr {
-            prefer_meters: false,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([1, 2]))?;
+        let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([1, 2]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([3]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([3]))?;
         assert_eq!(expr.to_string(), "#3");
 
         // Add a battery meter with three inverter and three batteries
@@ -282,11 +294,7 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 5);
 
         let graph = builder.build(None)?;
-        let expr = FallbackExpr {
-            prefer_meters: false,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([3, 5]))?;
+        let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([3, 5]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -299,11 +307,9 @@ mod tests {
             )
         );
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 5]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 5]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -312,11 +318,9 @@ mod tests {
             )
         );
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -325,11 +329,9 @@ mod tests {
             )
         );
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 7, 8]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 7, 8]))?;
         assert_eq!(
             expr.to_string(),
             "COALESCE(#2, #3, 0.0) + COALESCE(#7, 0.0) + COALESCE(#8, 0.0)"
@@ -339,32 +341,22 @@ mod tests {
             disable_fallback_components: true,
             ..Default::default()
         }))?;
-        let expr = FallbackExpr {
-            prefer_meters: false,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([3, 5]))?;
+        let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([3, 5]))?;
         assert_eq!(expr.to_string(), "#3 + #5");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 5]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 5]))?;
         assert_eq!(expr.to_string(), "#2 + #5");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 6, 7, 8]))?;
         assert_eq!(expr.to_string(), "#2 + #6 + #7 + #8");
 
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([2, 7, 8]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([2, 7, 8]))?;
         assert_eq!(expr.to_string(), "#2 + #7 + #8");
 
         let meter = builder.meter();
@@ -379,11 +371,9 @@ mod tests {
         assert_eq!(pv_inverter.component_id(), 14);
 
         let graph = builder.build(None)?;
-        let expr = FallbackExpr {
-            prefer_meters: true,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([5, 12]))?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .generate(&graph, BTreeSet::from([5, 12]))?;
         assert_eq!(
             expr.to_string(),
             concat!(
@@ -392,11 +382,7 @@ mod tests {
             )
         );
 
-        let expr = FallbackExpr {
-            prefer_meters: false,
-            meter_fallback_for_meters: false,
-        }
-        .generate(&graph, BTreeSet::from([7, 14]))?;
+        let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([7, 14]))?;
         assert_eq!(expr.to_string(), "COALESCE(#7, 0.0) + COALESCE(#14, 0.0)");
 
         Ok(())
@@ -422,5 +408,31 @@ mod tests {
         let graph = builder.build(None).unwrap();
         let expr = graph.pv_formula(None).unwrap().to_string();
         assert_eq!(expr, "COALESCE(#1, 0.0) + COALESCE(#2, 0.0)");
+    }
+
+    /// Test meters with meter fallback
+    #[test]
+    fn test_meters_with_meter_fallback() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let meter1 = builder.meter();
+        let meter2 = builder.meter();
+        let bat_chain = builder.meter_bat_chain(1, 1);
+        let pv_chain = builder.meter_pv_chain(1);
+
+        builder.connect(grid, meter1);
+        builder.connect(meter1, meter2);
+        builder.connect(meter2, bat_chain);
+        builder.connect(meter2, pv_chain);
+
+        let graph = builder.build(None)?;
+        let expr = FallbackExpr::new()
+            .prefer_meters(true)
+            .meter_fallback_for_meters(true)
+            .generate(&graph, BTreeSet::from([meter1.component_id()]))?;
+        assert_eq!(expr.to_string(), "COALESCE(#1, #2)");
+
+        Ok(())
     }
 }
