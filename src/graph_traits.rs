@@ -31,7 +31,7 @@ impl frequenz_microgrid_component_graph::Node for common::v1::microgrid::compone
 
         match category {
             pb::ComponentCategory::Unspecified => gr::ComponentCategory::Unspecified,
-            pb::ComponentCategory::Grid => gr::ComponentCategory::Grid,
+            pb::ComponentCategory::Grid => gr::ComponentCategory::GridConnectionPoint,
             pb::ComponentCategory::Meter => gr::ComponentCategory::Meter,
             pb::ComponentCategory::Inverter => {
                 gr::ComponentCategory::Inverter(match self.category_type {
@@ -43,7 +43,7 @@ impl frequenz_microgrid_component_graph::Node for common::v1::microgrid::compone
                                 error!("Error converting inverter type: {}", e);
                                 pb::InverterType::Unspecified
                             }) {
-                                pb::InverterType::Solar => gr::InverterType::Solar,
+                                pb::InverterType::Solar => gr::InverterType::Pv,
                                 pb::InverterType::Battery => gr::InverterType::Battery,
                                 pb::InverterType::Hybrid => gr::InverterType::Hybrid,
                                 pb::InverterType::Unspecified => gr::InverterType::Unspecified,
@@ -111,8 +111,7 @@ impl frequenz_microgrid_component_graph::Node for common::v1::microgrid::compone
             pb::ComponentCategory::Chp => gr::ComponentCategory::Chp,
             pb::ComponentCategory::Relay => gr::ComponentCategory::Relay,
             pb::ComponentCategory::Precharger => gr::ComponentCategory::Precharger,
-            pb::ComponentCategory::Fuse => gr::ComponentCategory::Fuse,
-            pb::ComponentCategory::VoltageTransformer => gr::ComponentCategory::VoltageTransformer,
+            pb::ComponentCategory::VoltageTransformer => gr::ComponentCategory::PowerTransformer,
             pb::ComponentCategory::Hvac => gr::ComponentCategory::Hvac,
             pb::ComponentCategory::SteamBoiler => gr::ComponentCategory::SteamBoiler,
         }
