@@ -160,6 +160,11 @@ impl ComponentGraphBuilder {
         self.add_component(ComponentCategory::SteamBoiler)
     }
 
+    /// Adds a power transformer (pass-through category) to the graph.
+    pub(super) fn power_transformer(&mut self) -> ComponentHandle {
+        self.add_component(ComponentCategory::PowerTransformer)
+    }
+
     /// Connects two components in the graph.
     pub(super) fn connect(&mut self, from: ComponentHandle, to: ComponentHandle) -> &mut Self {
         self.connections

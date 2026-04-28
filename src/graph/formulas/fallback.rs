@@ -412,6 +412,194 @@ mod tests {
         assert_eq!(expr, "COALESCE(#1, 0.0) + COALESCE(#2, 0.0)");
     }
 
+    // ---------------------------------------------------------------
+    // Pass-through scenarios.
+    //
+    // These tests document the *desired* behavior when a component
+    // category that has no specific handling (here: `PowerTransformer`)
+    // sits in the topology. Validators and the formula generator
+    // should treat such a node as transparent — walking through it
+    // instead of rejecting otherwise-valid neighbor relationships or
+    // emitting it as a measurement source.
+    //
+    // Each test is `#[ignore]` until the corresponding fix lands;
+    // `cargo test -- --ignored` reproduces today's incorrect output.
+    // ---------------------------------------------------------------
+
+    /// Validation accepts a graph where a pass-through category sits
+    /// between an inverter and its meter / between a meter and the
+    /// grid. Neighbor rules (`M1`, `I1-I4`, `B1`) consult the
+    /// effective predecessors / successors, so the chain through the
+    /// pass-through reads as if it weren't there.
+    ///
+    /// Topology: `Grid → PowerTransformer → Meter → BatteryInverter → Battery`
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_validation_accepts_passthrough_predecessor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        // Should build cleanly with the default config.
+        let _graph = builder.build(None)?;
+        Ok(())
+    }
+
+    /// A pass-through-only cycle attached to an otherwise-valid graph
+    /// is rejected at construction time. The acyclicity validator
+    /// walks the raw graph so cycles composed entirely of pass-through
+    /// nodes are still detected.
+    ///
+    /// Topology: a normal `Grid → Meter → BatteryInverter → Battery`
+    /// branch, plus a side-branch `Grid → PT1 → PT2 → PT3 → PT1` cycle.
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_acyclicity_detects_passthrough_only_cycle() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        let pt1 = builder.power_transformer();
+        let pt2 = builder.power_transformer();
+        let pt3 = builder.power_transformer();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        builder.connect(grid, pt1);
+        builder.connect(pt1, pt2);
+        builder.connect(pt2, pt3);
+        builder.connect(pt3, pt1);
+
+        assert!(
+            builder.build(None).is_err(),
+            "PT-only cycle reachable from the GCP must be detected at construction time"
+        );
+        Ok(())
+    }
+
+    /// A pass-through component preceding the GCP is tolerated: the
+    /// effective predecessors view walks past it, so `ensure_root` sees
+    /// no ancestor and accepts the GCP as a root.
+    ///
+    /// Topology: `PT → Grid → Meter → BatteryInverter → Battery`.
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_ensure_root_tolerates_passthrough_predecessor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(pt, grid);
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let _graph = builder.build(None)?;
+        Ok(())
+    }
+
+    /// Grid formula skips a PowerTransformer that sits directly below
+    /// the GCP and uses the meter beneath it as the measurement source
+    /// — the formula is identical to the equivalent
+    /// `Grid → Meter → Inverter → Battery` graph.
+    ///
+    /// Topology (component ids): `Grid:0 → PT:1 → Meter:2 → Inverter:3 → Battery:4`
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_grid_formula_skips_passthrough_at_root() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_formula()?.to_string();
+        assert!(
+            !formula.contains("#1"),
+            "PowerTransformer #1 must not appear in grid_formula, got {formula:?}",
+        );
+        assert_eq!(formula, "COALESCE(#2, #3, 0.0)");
+        Ok(())
+    }
+
+    /// Meter fallback sums the meter's *effective* successors —
+    /// walking past pass-throughs to the inverter rather than
+    /// including the transformer (which has no measurement).
+    ///
+    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_meter_fallback_skips_passthrough_successor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let pt = builder.power_transformer();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, pt);
+        builder.connect(pt, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_formula()?.to_string();
+        assert!(
+            !formula.contains("#2"),
+            "PowerTransformer #2 must not appear in grid_formula, got {formula:?}",
+        );
+        assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        Ok(())
+    }
+
+    /// Component fallback must find a predecessor meter through a
+    /// pass-through node.
+    ///
+    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
+    #[test]
+    #[ignore = "fails today; pass-through transparency not yet implemented"]
+    fn test_component_fallback_finds_meter_through_passthrough() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let pt = builder.power_transformer();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, pt);
+        builder.connect(pt, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.battery_formula(None)?.to_string();
+        // Inverter falls back to its effective predecessor meter,
+        // walking past the transformer.
+        assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        Ok(())
+    }
+
     /// Test meters with meter fallback
     #[test]
     fn test_meters_with_meter_fallback() -> Result<(), Error> {
