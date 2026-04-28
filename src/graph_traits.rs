@@ -109,7 +109,7 @@ impl frequenz_microgrid_component_graph::Node for common::v1::microgrid::compone
             pb::ComponentCategory::CryptoMiner => gr::ComponentCategory::CryptoMiner,
             pb::ComponentCategory::Electrolyzer => gr::ComponentCategory::Electrolyzer,
             pb::ComponentCategory::Chp => gr::ComponentCategory::Chp,
-            pb::ComponentCategory::Relay => gr::ComponentCategory::Relay,
+            pb::ComponentCategory::Relay => gr::ComponentCategory::Breaker,
             pb::ComponentCategory::Precharger => gr::ComponentCategory::Precharger,
             pb::ComponentCategory::VoltageTransformer => gr::ComponentCategory::PowerTransformer,
             pb::ComponentCategory::Hvac => gr::ComponentCategory::Hvac,
