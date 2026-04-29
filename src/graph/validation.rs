@@ -52,6 +52,7 @@ where
             validator.validate_batteries(),
             validator.validate_ev_chargers(),
             validator.validate_chps(),
+            validator.validate_steam_boilers(),
         ] {
             if let Err(e) = result {
                 errors.push(e);

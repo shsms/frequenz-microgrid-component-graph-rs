@@ -144,4 +144,13 @@ where
     ) -> Result<CoalesceFormula, Error> {
         Ok(Expr::component(component_id).into())
     }
+
+    /// Returns the steam boiler formula for the graph.
+    pub fn steam_boiler_formula(
+        &self,
+        steam_boiler_ids: Option<BTreeSet<u64>>,
+    ) -> Result<AggregationFormula, Error> {
+        generators::steam_boiler::SteamBoilerFormulaBuilder::try_new(self, steam_boiler_ids)?
+            .build()
+    }
 }

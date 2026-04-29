@@ -86,20 +86,37 @@ where
             && has_successors)
     }
 
+    /// Returns true if the node is a steam boiler meter.
+    ///
+    /// A meter is identified as a steam boiler meter if
+    ///   - it has at least one successor
+    ///   - all its successors are steam boilers.
+    pub fn is_steam_boiler_meter(&self, component_id: u64) -> Result<bool, Error> {
+        let mut has_successors = false;
+        Ok(self.component(component_id)?.is_meter()
+            && self.successors(component_id)?.all(|n| {
+                has_successors = true;
+                n.is_steam_boiler()
+            })
+            && has_successors)
+    }
+
     /// Returns true if the node is a component meter.
     ///
     /// A meter is a component meter if it is one of the following:
     ///  - a PV meter,
     ///  - a battery meter,
     ///  - an EV charger meter,
-    ///  - a CHP meter.
-    ///  - a Wind Turbine meter.
+    ///  - a CHP meter,
+    ///  - a Wind Turbine meter,
+    ///  - a Steam Boiler meter.
     pub fn is_component_meter(&self, component_id: u64) -> Result<bool, Error> {
         Ok(self.is_pv_meter(component_id)?
             || self.is_battery_meter(component_id)?
             || self.is_ev_charger_meter(component_id)?
             || self.is_chp_meter(component_id)?
-            || self.is_wind_turbine_meter(component_id)?)
+            || self.is_wind_turbine_meter(component_id)?
+            || self.is_steam_boiler_meter(component_id)?)
     }
 
     /// Returns true if the node is part of a battery chain.
@@ -155,6 +172,16 @@ where
             || self.component(component_id)?.is_wind_turbine())
     }
 
+    /// Returns true if the node is part of a steam boiler chain.
+    ///
+    /// A component is part of a steam boiler chain if it is one of the following:
+    /// - a steam boiler meter,
+    /// - a steam boiler.
+    pub fn is_steam_boiler_chain(&self, component_id: u64) -> Result<bool, Error> {
+        Ok(self.is_steam_boiler_meter(component_id)?
+            || self.component(component_id)?.is_steam_boiler())
+    }
+
     /// Returns true if the node is part of a component chain.
     ///
     /// A component is part of a component chain if it is part of one of the
@@ -163,13 +190,15 @@ where
     ///  - a PV chain,
     ///  - an EV charger chain,
     ///  - a CHP chain,
-    ///  - a Wind Turbine chain.
+    ///  - a Wind Turbine chain,
+    ///  - a steam boiler chain.
     pub fn is_component_chain(&self, component_id: u64) -> Result<bool, Error> {
         Ok(self.is_battery_chain(component_id)?
             || self.is_pv_chain(component_id)?
             || self.is_ev_charger_chain(component_id)?
             || self.is_chp_chain(component_id)?
-            || self.is_wind_turbine_chain(component_id)?)
+            || self.is_wind_turbine_chain(component_id)?
+            || self.is_steam_boiler_chain(component_id)?)
     }
 }
 
@@ -204,6 +233,8 @@ mod tests {
             TestComponent::new(16, ComponentCategory::Inverter(InverterType::Pv)),
             TestComponent::new(17, ComponentCategory::Inverter(InverterType::Battery)),
             TestComponent::new(18, ComponentCategory::Battery(BatteryType::LiIon)),
+            TestComponent::new(19, ComponentCategory::Meter),
+            TestComponent::new(20, ComponentCategory::SteamBoiler),
         ];
         let connections = vec![
             // Single Grid meter
@@ -229,6 +260,9 @@ mod tests {
             TestConnection::new(14, 16),
             TestConnection::new(14, 17),
             TestConnection::new(17, 18),
+            // Steam boiler chain
+            TestConnection::new(2, 19),
+            TestConnection::new(19, 20),
         ];
 
         (components, connections)
@@ -238,36 +272,42 @@ mod tests {
         let (mut components, mut connections) = nodes_and_edges();
 
         // Add a meter to the grid without successors
-        components.push(TestComponent::new(19, ComponentCategory::Meter));
-        connections.push(TestConnection::new(1, 19));
+        components.push(TestComponent::new(21, ComponentCategory::Meter));
+        connections.push(TestConnection::new(1, 21));
 
         // Add a meter to the grid that has a battery meter and a PV meter as
         // successors.
-        components.push(TestComponent::new(20, ComponentCategory::Meter));
-        connections.push(TestConnection::new(1, 20));
+        components.push(TestComponent::new(22, ComponentCategory::Meter));
+        connections.push(TestConnection::new(1, 22));
 
         // battery chain
-        components.push(TestComponent::new(21, ComponentCategory::Meter));
+        components.push(TestComponent::new(23, ComponentCategory::Meter));
         components.push(TestComponent::new(
-            22,
+            24,
             ComponentCategory::Inverter(InverterType::Battery),
         ));
         components.push(TestComponent::new(
-            23,
+            25,
             ComponentCategory::Battery(BatteryType::Unspecified),
         ));
-        connections.push(TestConnection::new(20, 21));
-        connections.push(TestConnection::new(21, 22));
         connections.push(TestConnection::new(22, 23));
+        connections.push(TestConnection::new(23, 24));
+        connections.push(TestConnection::new(24, 25));
 
         // pv chain
-        components.push(TestComponent::new(24, ComponentCategory::Meter));
+        components.push(TestComponent::new(26, ComponentCategory::Meter));
         components.push(TestComponent::new(
-            25,
+            27,
             ComponentCategory::Inverter(InverterType::Pv),
         ));
-        connections.push(TestConnection::new(20, 24));
-        connections.push(TestConnection::new(24, 25));
+        connections.push(TestConnection::new(22, 26));
+        connections.push(TestConnection::new(26, 27));
+
+        // steam boiler chain
+        components.push(TestComponent::new(28, ComponentCategory::Meter));
+        components.push(TestComponent::new(29, ComponentCategory::SteamBoiler));
+        connections.push(TestConnection::new(22, 28));
+        connections.push(TestConnection::new(28, 29));
 
         (components, connections)
     }
@@ -277,13 +317,13 @@ mod tests {
 
         // Add an EV charger meter to the grid, then none of the meters
         // connected to the grid should be detected as grid meters.
-        components.push(TestComponent::new(20, ComponentCategory::Meter));
+        components.push(TestComponent::new(21, ComponentCategory::Meter));
         components.push(TestComponent::new(
-            21,
+            22,
             ComponentCategory::EvCharger(EvChargerType::Ac),
         ));
-        connections.push(TestConnection::new(1, 20));
-        connections.push(TestConnection::new(20, 21));
+        connections.push(TestConnection::new(1, 21));
+        connections.push(TestConnection::new(21, 22));
 
         (components, connections)
     }
@@ -318,7 +358,7 @@ mod tests {
         let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
             find_matching_components(components, connections, ComponentGraph::is_pv_meter)?,
-            vec![9, 24],
+            vec![9, 26],
         );
 
         let (components, connections) = without_grid_meters();
@@ -341,7 +381,7 @@ mod tests {
         let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
             find_matching_components(components, connections, ComponentGraph::is_battery_meter)?,
-            vec![3, 6, 21],
+            vec![3, 6, 23],
         );
 
         let (components, connections) = without_grid_meters();
@@ -393,7 +433,42 @@ mod tests {
         let (components, connections) = without_grid_meters();
         assert_eq!(
             find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
-            vec![20],
+            vec![21],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_steam_boiler_meter() -> Result<(), Error> {
+        let (components, connections) = nodes_and_edges();
+        assert_eq!(
+            find_matching_components(
+                components,
+                connections,
+                ComponentGraph::is_steam_boiler_meter
+            )?,
+            vec![19],
+        );
+
+        let (components, connections) = with_multiple_grid_meters();
+        assert_eq!(
+            find_matching_components(
+                components,
+                connections,
+                ComponentGraph::is_steam_boiler_meter
+            )?,
+            vec![19, 28],
+        );
+
+        let (components, connections) = without_grid_meters();
+        assert_eq!(
+            find_matching_components(
+                components,
+                connections,
+                ComponentGraph::is_steam_boiler_meter
+            )?,
+            vec![19],
         );
 
         Ok(())

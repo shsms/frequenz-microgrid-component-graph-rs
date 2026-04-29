@@ -155,6 +155,11 @@ impl ComponentGraphBuilder {
         self.add_component(ComponentCategory::WindTurbine)
     }
 
+    /// Adds a steam boiler to the graph and returns its handle.
+    pub(super) fn steam_boiler(&mut self) -> ComponentHandle {
+        self.add_component(ComponentCategory::SteamBoiler)
+    }
+
     /// Connects two components in the graph.
     pub(super) fn connect(&mut self, from: ComponentHandle, to: ComponentHandle) -> &mut Self {
         self.connections
@@ -238,6 +243,17 @@ impl ComponentGraphBuilder {
         for _ in 0..num_wind_turbines {
             let wind_turbine = self.wind_turbine();
             self.connect(meter, wind_turbine);
+        }
+        meter
+    }
+
+    /// Adds a meter, followed by the given number of steam boilers, and
+    /// returns a handle to the meter.
+    pub(super) fn meter_steam_boiler_chain(&mut self, num_steam_boilers: usize) -> ComponentHandle {
+        let meter = self.meter();
+        for _ in 0..num_steam_boilers {
+            let steam_boiler = self.steam_boiler();
+            self.connect(meter, steam_boiler);
         }
         meter
     }

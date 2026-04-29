@@ -144,6 +144,21 @@ where
         }
         Ok(())
     }
+
+    /// Validates that steam boilers:
+    ///  - have only the Grid or a Meter as predecessors,
+    ///  - don't have any successors.
+    pub(super) fn validate_steam_boilers(&self) -> Result<(), Error> {
+        for steam_boiler in self.cg.components().filter(|n| n.is_steam_boiler()) {
+            self.ensure_leaf(steam_boiler)?;
+            self.ensure_on_predecessors(
+                steam_boiler,
+                |n| n.is_grid() || n.is_meter(),
+                "the Grid or a Meter",
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +477,35 @@ r#"InvalidGraph: Multiple validation failures:
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
                         "CHP:3 can't have any successors. Found Electrolyzer:4.",
+                    )
+                }),
+        );
+
+        components.pop();
+        connections.pop();
+
+        assert!(ComponentGraph::try_new(components, connections, config.clone()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_steam_boilers() {
+        let config = ComponentGraphConfig::default();
+        let mut components = vec![
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::SteamBoiler),
+            TestComponent::new(4, ComponentCategory::Electrolyzer),
+        ];
+        let mut connections = vec![
+            TestConnection::new(1, 2),
+            TestConnection::new(2, 3),
+            TestConnection::new(3, 4),
+        ];
+        assert!(
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(|e| {
+                    e == Error::invalid_graph(
+                        "SteamBoiler:3 can't have any successors. Found Electrolyzer:4.",
                     )
                 }),
         );

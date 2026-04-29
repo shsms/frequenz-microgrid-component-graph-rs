@@ -92,6 +92,7 @@ pub enum ComponentCategory {
     UninterruptiblePowerSupply,
     CapacitorBank,
     WindTurbine,
+    SteamBoiler,
 }
 
 impl Display for ComponentCategory {
@@ -120,6 +121,7 @@ impl Display for ComponentCategory {
             }
             ComponentCategory::CapacitorBank => write!(f, "CapacitorBank"),
             ComponentCategory::WindTurbine => write!(f, "WindTurbine"),
+            ComponentCategory::SteamBoiler => write!(f, "SteamBoiler"),
         }
     }
 }
@@ -183,6 +185,10 @@ pub(crate) trait CategoryPredicates: Node {
 
     fn is_wind_turbine(&self) -> bool {
         self.category() == ComponentCategory::WindTurbine
+    }
+
+    fn is_steam_boiler(&self) -> bool {
+        self.category() == ComponentCategory::SteamBoiler
     }
 }
 
