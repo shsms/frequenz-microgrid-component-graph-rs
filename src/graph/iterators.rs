@@ -52,8 +52,12 @@ where
     }
 }
 
-/// An iterator over the neighbors of a component in a `ComponentGraph`.
-pub struct Neighbors<'a, N>
+/// An iterator over the *raw* (graph-direct) neighbors of a component.
+///
+/// Returned by [`ComponentGraph::raw_predecessors`] and
+/// [`ComponentGraph::raw_successors`]. Yields every node connected by an
+/// edge, including pass-through categories.
+pub struct RawNeighbors<'a, N>
 where
     N: Node,
 {
@@ -61,7 +65,7 @@ where
     pub(crate) iter: petgraph::graph::Neighbors<'a, ()>,
 }
 
-impl<'a, N> Iterator for Neighbors<'a, N>
+impl<'a, N> Iterator for RawNeighbors<'a, N>
 where
     N: Node,
 {
@@ -78,7 +82,7 @@ where
     N: Node,
 {
     pub(crate) component_id: u64,
-    pub(crate) iter: Flatten<IntoIter<Neighbors<'a, N>>>,
+    pub(crate) iter: Flatten<IntoIter<RawNeighbors<'a, N>>>,
     visited: HashSet<u64>,
 }
 
@@ -86,7 +90,7 @@ impl<'a, N> Siblings<'a, N>
 where
     N: Node,
 {
-    pub(crate) fn new(component_id: u64, iter: Flatten<IntoIter<Neighbors<'a, N>>>) -> Self {
+    pub(crate) fn new(component_id: u64, iter: Flatten<IntoIter<RawNeighbors<'a, N>>>) -> Self {
         Siblings {
             component_id,
             iter,
