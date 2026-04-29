@@ -48,17 +48,7 @@ where
     ///
     /// Returns an error if the given `component_id` does not exist.
     pub fn raw_predecessors(&self, component_id: u64) -> Result<RawNeighbors<'_, N>, Error> {
-        self.node_indices
-            .get(&component_id)
-            .map(|&index| RawNeighbors {
-                graph: &self.graph,
-                iter: self
-                    .graph
-                    .neighbors_directed(index, petgraph::Direction::Incoming),
-            })
-            .ok_or_else(|| {
-                Error::component_not_found(format!("Component with id {component_id} not found."))
-            })
+        self.raw_neighbors(component_id, petgraph::Direction::Incoming)
     }
 
     /// Returns an iterator over the *raw* (graph-direct) successors of
@@ -71,13 +61,21 @@ where
     ///
     /// Returns an error if the given `component_id` does not exist.
     pub fn raw_successors(&self, component_id: u64) -> Result<RawNeighbors<'_, N>, Error> {
+        self.raw_neighbors(component_id, petgraph::Direction::Outgoing)
+    }
+
+    /// Shared implementation for [`raw_predecessors`][Self::raw_predecessors]
+    /// and [`raw_successors`][Self::raw_successors].
+    fn raw_neighbors(
+        &self,
+        component_id: u64,
+        direction: petgraph::Direction,
+    ) -> Result<RawNeighbors<'_, N>, Error> {
         self.node_indices
             .get(&component_id)
             .map(|&index| RawNeighbors {
                 graph: &self.graph,
-                iter: self
-                    .graph
-                    .neighbors_directed(index, petgraph::Direction::Outgoing),
+                iter: self.graph.neighbors_directed(index, direction),
             })
             .ok_or_else(|| {
                 Error::component_not_found(format!("Component with id {component_id} not found."))
