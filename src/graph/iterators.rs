@@ -76,13 +76,38 @@ where
     }
 }
 
+/// An iterator over the *effective* (pass-through-aware) neighbors of a
+/// component.
+///
+/// Returned by [`ComponentGraph::predecessors`] and
+/// [`ComponentGraph::successors`]. Yields only non-pass-through ancestors
+/// or descendants, walking transparently past pass-through nodes in the
+/// chain. Eagerly collected at construction time.
+pub struct Neighbors<'a, N>
+where
+    N: Node,
+{
+    pub(crate) iter: IntoIter<&'a N>,
+}
+
+impl<'a, N> Iterator for Neighbors<'a, N>
+where
+    N: Node,
+{
+    type Item = &'a N;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
 /// An iterator over the siblings of a component in a `ComponentGraph`.
 pub struct Siblings<'a, N>
 where
     N: Node,
 {
     pub(crate) component_id: u64,
-    pub(crate) iter: Flatten<IntoIter<RawNeighbors<'a, N>>>,
+    pub(crate) iter: Flatten<IntoIter<Neighbors<'a, N>>>,
     visited: HashSet<u64>,
 }
 
@@ -90,7 +115,7 @@ impl<'a, N> Siblings<'a, N>
 where
     N: Node,
 {
-    pub(crate) fn new(component_id: u64, iter: Flatten<IntoIter<RawNeighbors<'a, N>>>) -> Self {
+    pub(crate) fn new(component_id: u64, iter: Flatten<IntoIter<Neighbors<'a, N>>>) -> Self {
         Siblings {
             component_id,
             iter,

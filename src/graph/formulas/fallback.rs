@@ -421,9 +421,6 @@ mod tests {
     // should treat such a node as transparent — walking through it
     // instead of rejecting otherwise-valid neighbor relationships or
     // emitting it as a measurement source.
-    //
-    // Each test is `#[ignore]` until the corresponding fix lands;
-    // `cargo test -- --ignored` reproduces today's incorrect output.
     // ---------------------------------------------------------------
 
     /// Validation accepts a graph where a pass-through category sits
@@ -434,7 +431,6 @@ mod tests {
     ///
     /// Topology: `Grid → PowerTransformer → Meter → BatteryInverter → Battery`
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_validation_accepts_passthrough_predecessor() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -461,7 +457,6 @@ mod tests {
     /// Topology: a normal `Grid → Meter → BatteryInverter → Battery`
     /// branch, plus a side-branch `Grid → PT1 → PT2 → PT3 → PT1` cycle.
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_acyclicity_detects_passthrough_only_cycle() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -494,7 +489,6 @@ mod tests {
     ///
     /// Topology: `PT → Grid → Meter → BatteryInverter → Battery`.
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_ensure_root_tolerates_passthrough_predecessor() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -519,7 +513,6 @@ mod tests {
     ///
     /// Topology (component ids): `Grid:0 → PT:1 → Meter:2 → Inverter:3 → Battery:4`
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_grid_formula_skips_passthrough_at_root() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -549,7 +542,6 @@ mod tests {
     ///
     /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_meter_fallback_skips_passthrough_successor() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -578,7 +570,6 @@ mod tests {
     ///
     /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
     #[test]
-    #[ignore = "fails today; pass-through transparency not yet implemented"]
     fn test_component_fallback_finds_meter_through_passthrough() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();

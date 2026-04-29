@@ -139,9 +139,6 @@ impl ComponentCategory {
     /// `Unspecified` is intentionally not a pass-through: it's rejected
     /// at graph-construction time before validators or formula
     /// generators ever see it.
-    // Consumed by the pass-through-aware `predecessors`/`successors` and
-    // the construction-time warning in subsequent commits.
-    #[allow(dead_code)]
     pub(crate) fn is_passthrough(self) -> bool {
         use ComponentCategory as C;
         matches!(
