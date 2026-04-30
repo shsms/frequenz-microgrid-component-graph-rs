@@ -66,13 +66,13 @@ where
     ) -> Result<(), Error> {
         predecessors.push(node.component_id());
         for successor in self.cg.raw_successors(node.component_id())? {
-            if let Some(first_occurance) = predecessors
+            if let Some(first_occurrence) = predecessors
                 .iter()
                 .position(|id| *id == successor.component_id())
             {
                 return Err(Error::invalid_graph(format!(
                     "Cycle detected: {} -> {}",
-                    predecessors[first_occurance..]
+                    predecessors[first_occurrence..]
                         .iter()
                         .map(|x| x.to_string())
                         .collect::<Vec<_>>()
