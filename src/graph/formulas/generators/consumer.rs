@@ -401,7 +401,7 @@ mod tests {
             ..Default::default()
         }))?;
         let formula = graph_no_phantom.consumer_formula()?.to_string();
-        assert_eq!(formula, concat!("MAX(#1 - #2 - #5 - #8 - #9 - #10, 0.0)"));
+        assert_eq!(formula, "MAX(#1 - #2 - #5 - #8 - #9 - #10, 0.0)");
 
         // add a battery chain to the grid meter and a dangling meter to the grid.
         let meter_bat_chain = builder.meter_bat_chain(1, 1);
