@@ -61,4 +61,10 @@ pub struct ComponentGraphConfig {
     /// will be secondary.  When `false`, wind meters will be the primary
     /// source.
     pub prefer_wind_turbines_in_wind_formula: bool,
+
+    /// Whether to prefer steam boilers when generating steam boiler formulas.  When
+    /// this is `true`, steam boilers will be the primary source and steam boiler
+    /// meters will be secondary.  When `false`, steam boiler meters will be the
+    /// primary source.
+    pub prefer_steam_boilers_in_steam_boiler_formula: bool,
 }

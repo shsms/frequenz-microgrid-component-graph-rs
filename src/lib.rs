@@ -52,6 +52,7 @@ metrics of the microgrid.  The following formulas are supported:
 - [`battery_formula`][ComponentGraph::battery_formula]
 - [`ev_charger_formula`][ComponentGraph::ev_charger_formula]
 - [`chp_formula`][ComponentGraph::chp_formula]
+- [`steam_boiler_formula`][ComponentGraph::steam_boiler_formula]
 */
 
 mod component_category;

@@ -114,6 +114,7 @@ impl frequenz_microgrid_component_graph::Node for common::v1::microgrid::compone
             pb::ComponentCategory::Fuse => gr::ComponentCategory::Fuse,
             pb::ComponentCategory::VoltageTransformer => gr::ComponentCategory::VoltageTransformer,
             pb::ComponentCategory::Hvac => gr::ComponentCategory::Hvac,
+            pb::ComponentCategory::SteamBoiler => gr::ComponentCategory::SteamBoiler,
         }
     }
 }
