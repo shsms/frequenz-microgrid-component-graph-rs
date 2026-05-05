@@ -68,4 +68,6 @@ mod error;
 pub use error::Error;
 
 mod config;
-pub use config::{ComponentGraphConfig, FormulaOverrides, FormulaOverridesBuilder};
+pub use config::{
+    ComponentGraphConfig, ComponentGraphConfigBuilder, FormulaOverrides, FormulaOverridesBuilder,
+};

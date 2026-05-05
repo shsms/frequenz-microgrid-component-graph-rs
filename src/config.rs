@@ -122,6 +122,94 @@ impl ComponentGraphConfig {
             .prefer_meters_in_steam_boiler_formula
             .unwrap_or(self.prefer_meters_in_component_formulas)
     }
+
+    /// Returns a [`ComponentGraphConfigBuilder`] initialised with all
+    /// options set to their default values.
+    pub fn builder() -> ComponentGraphConfigBuilder {
+        ComponentGraphConfigBuilder::new()
+    }
+}
+
+/// Builder for [`ComponentGraphConfig`].
+///
+/// Each method sets the corresponding option and returns `self`, so calls
+/// can be chained. Call [`build`][Self::build] to obtain the final
+/// `ComponentGraphConfig`.
+#[derive(Clone, Debug)]
+pub struct ComponentGraphConfigBuilder {
+    inner: ComponentGraphConfig,
+}
+
+impl ComponentGraphConfigBuilder {
+    /// Creates a new builder with all options set to their default values.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: ComponentGraphConfig::default(),
+        }
+    }
+
+    /// When `true`, the graph is built even if per-component validation
+    /// rules fail; failures are reported as `tracing::warn!` instead of
+    /// returning an error.
+    pub fn allow_component_validation_failures(mut self, value: bool) -> Self {
+        self.inner.allow_component_validation_failures = value;
+        self
+    }
+
+    /// When `true`, components that are not reachable from the root are
+    /// permitted; otherwise the graph fails to build.
+    pub fn allow_unconnected_components(mut self, value: bool) -> Self {
+        self.inner.allow_unconnected_components = value;
+        self
+    }
+
+    /// When `true`, inverters with `InverterType::Unspecified` are
+    /// treated as battery inverters instead of being rejected.
+    pub fn allow_unspecified_inverters(mut self, value: bool) -> Self {
+        self.inner.allow_unspecified_inverters = value;
+        self
+    }
+
+    /// When `true`, generated formulas omit fallback components.
+    pub fn disable_fallback_components(mut self, value: bool) -> Self {
+        self.inner.disable_fallback_components = value;
+        self
+    }
+
+    /// Controls how the consumer formula handles meters with successors,
+    /// which can carry loads not represented in the graph (phantom loads).
+    ///
+    /// When `true`, phantom loads are included by subtracting successor
+    /// meter measurements from their predecessor meter's measurements.
+    /// When `false`, the consumer formula instead excludes production and
+    /// battery components from the grid measurements.
+    pub fn include_phantom_loads_in_consumer_formula(mut self, value: bool) -> Self {
+        self.inner.include_phantom_loads_in_consumer_formula = value;
+        self
+    }
+
+    /// Sets the global meter-vs-device source preference for the
+    /// per-category formulas. See the field-level docs on
+    /// [`ComponentGraphConfig`] for the exact list of affected formulas.
+    pub fn prefer_meters_in_component_formulas(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_component_formulas = value;
+        self
+    }
+
+    /// Sets the per-formula overrides for the meter/device preference.
+    /// Each override, when `Some(_)`, takes precedence over
+    /// [`prefer_meters_in_component_formulas`][Self::prefer_meters_in_component_formulas]
+    /// for that formula.
+    pub fn formula_overrides(mut self, overrides: FormulaOverrides) -> Self {
+        self.inner.formula_overrides = overrides;
+        self
+    }
+
+    /// Consumes the builder and returns the resulting [`ComponentGraphConfig`].
+    pub fn build(self) -> ComponentGraphConfig {
+        self.inner
+    }
 }
 
 /// Per-formula overrides for the meter/device preference in the
