@@ -52,13 +52,42 @@ where
     }
 }
 
-/// An iterator over the neighbors of a component in a `ComponentGraph`.
-pub struct Neighbors<'a, N>
+/// An iterator over the *raw* (graph-direct) neighbors of a component.
+///
+/// Returned by [`ComponentGraph::raw_predecessors`] and
+/// [`ComponentGraph::raw_successors`]. Yields every node connected by an
+/// edge, including pass-through categories.
+pub struct RawNeighbors<'a, N>
 where
     N: Node,
 {
     pub(crate) graph: &'a DiGraph<N, ()>,
     pub(crate) iter: petgraph::graph::Neighbors<'a, ()>,
+}
+
+impl<'a, N> Iterator for RawNeighbors<'a, N>
+where
+    N: Node,
+{
+    type Item = &'a N;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|i| &self.graph[i])
+    }
+}
+
+/// An iterator over the *effective* (pass-through-aware) neighbors of a
+/// component.
+///
+/// Returned by [`ComponentGraph::predecessors`] and
+/// [`ComponentGraph::successors`]. Yields only non-pass-through ancestors
+/// or descendants, walking transparently past pass-through nodes in the
+/// chain. Eagerly collected at construction time.
+pub struct Neighbors<'a, N>
+where
+    N: Node,
+{
+    pub(crate) iter: IntoIter<&'a N>,
 }
 
 impl<'a, N> Iterator for Neighbors<'a, N>
@@ -68,7 +97,7 @@ where
     type Item = &'a N;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|i| &self.graph[i])
+        self.iter.next()
     }
 }
 

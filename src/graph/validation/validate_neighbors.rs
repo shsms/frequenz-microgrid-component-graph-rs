@@ -239,7 +239,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -254,7 +254,7 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone()).is_err_and(|e| {
                 e == Error::invalid_graph(
-                    "BatteryInverter:3 can only have successors that are Batteries. Found Electrolyzer:4.",
+                    "BatteryInverter:3 can only have successors that are Batteries. Found WindTurbine:4.",
                 )
             }),
             "{}",
@@ -287,7 +287,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Pv)),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -299,7 +299,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "PvInverter:3 can't have any successors. Found Electrolyzer:4.",
+                        "PvInverter:3 can't have any successors. Found WindTurbine:4.",
                     )
                 }),
         );
@@ -329,7 +329,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Inverter(InverterType::Hybrid)),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -341,7 +341,7 @@ r#"InvalidGraph: Multiple validation failures:
                 .is_err_and(|e| {
                     e == Error::invalid_graph(concat!(
                         "HybridInverter:3 can only have successors that are Batteries. ",
-                        "Found Electrolyzer:4."
+                        "Found WindTurbine:4."
                     ))
                 }),
         );
@@ -436,7 +436,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::EvCharger(EvChargerType::Dc)),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -447,7 +447,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "EVCharger(DC):3 can't have any successors. Found Electrolyzer:4.",
+                        "EVCharger(DC):3 can't have any successors. Found WindTurbine:4.",
                     )
                 }),
         );
@@ -465,7 +465,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::Chp),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -476,7 +476,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "CHP:3 can't have any successors. Found Electrolyzer:4.",
+                        "CHP:3 can't have any successors. Found WindTurbine:4.",
                     )
                 }),
         );
@@ -494,7 +494,7 @@ r#"InvalidGraph: Multiple validation failures:
             TestComponent::new(1, ComponentCategory::GridConnectionPoint),
             TestComponent::new(2, ComponentCategory::Meter),
             TestComponent::new(3, ComponentCategory::SteamBoiler),
-            TestComponent::new(4, ComponentCategory::Electrolyzer),
+            TestComponent::new(4, ComponentCategory::WindTurbine),
         ];
         let mut connections = vec![
             TestConnection::new(1, 2),
@@ -505,7 +505,7 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
                     e == Error::invalid_graph(
-                        "SteamBoiler:3 can't have any successors. Found Electrolyzer:4.",
+                        "SteamBoiler:3 can't have any successors. Found WindTurbine:4.",
                     )
                 }),
         );

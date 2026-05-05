@@ -15,10 +15,15 @@ where
     N: Node,
     E: Edge,
 {
-    /// Validates that all components are connected into a single graph.
+    /// Validates that all non-pass-through components are connected
+    /// into a single graph.
     ///
-    /// It does so by ensuring that all the components are reachable by
-    /// traversing the graph from the root node.
+    /// It does so by ensuring that all the components are reachable
+    /// by traversing the graph from the root node. Pass-through
+    /// components are exempt: they're transparent to the effective
+    /// successors view, so the walk never visits them, and we don't
+    /// require them to be reachable -- even when
+    /// `allow_unconnected_components` is `false`.
     pub(super) fn validate_connected_graph(&self, root: &N) -> Result<(), Error> {
         let root_id = root.component_id();
         let mut visited = BTreeSet::new();
@@ -34,6 +39,7 @@ where
         let unvisited = self
             .cg
             .components()
+            .filter(|n| !n.category().is_passthrough())
             .map(|n| n.component_id())
             .filter(|id| !visited.contains(id))
             .collect::<Vec<_>>();
@@ -50,21 +56,23 @@ where
     /// Validates that there are no cycles in the graph.
     ///
     /// If a cycle is detected, an error is returned, that lists the nodes in
-    /// the cycle.
+    /// the cycle. Walks via `raw_successors` so cycles composed entirely of
+    /// pass-through nodes (which are invisible to the effective view) are
+    /// still detected.
     pub(super) fn validate_acyclicity(
         &self,
         node: &N,
         mut predecessors: Vec<u64>,
     ) -> Result<(), Error> {
         predecessors.push(node.component_id());
-        for successor in self.cg.successors(node.component_id())? {
-            if let Some(first_occurance) = predecessors
+        for successor in self.cg.raw_successors(node.component_id())? {
+            if let Some(first_occurrence) = predecessors
                 .iter()
                 .position(|id| *id == successor.component_id())
             {
                 return Err(Error::invalid_graph(format!(
                     "Cycle detected: {} -> {}",
-                    predecessors[first_occurance..]
+                    predecessors[first_occurrence..]
                         .iter()
                         .map(|x| x.to_string())
                         .collect::<Vec<_>>()

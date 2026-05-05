@@ -38,6 +38,21 @@ where
 
         cg.validate()?;
 
+        // Notify operators that any pass-through nodes in the graph
+        // will be treated as transparent by validators and formula
+        // generators. Logged once per node, after validation, so we
+        // only warn for components that actually end up in the graph.
+        for component in cg.components() {
+            if component.category().is_passthrough() {
+                tracing::warn!(
+                    "Component {cid} ({category}) is a pass-through category and \
+                     will be treated as transparent in validators and formula generators.",
+                    cid = component.component_id(),
+                    category = component.category(),
+                );
+            }
+        }
+
         Ok(cg)
     }
 

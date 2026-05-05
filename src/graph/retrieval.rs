@@ -3,9 +3,10 @@
 
 //! Methods for retrieving components and connections from a [`ComponentGraph`].
 
-use crate::iterators::{Components, Connections, Neighbors, Siblings};
+use crate::iterators::{Components, Connections, Neighbors, RawNeighbors, Siblings};
 use crate::{ComponentGraph, Edge, Error, Node};
-use std::collections::BTreeSet;
+use petgraph::graph::NodeIndex;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 /// `Component` and `Connection` retrieval.
 impl<N, E> ComponentGraph<N, E>
@@ -38,40 +39,109 @@ where
         }
     }
 
-    /// Returns an iterator over the *predecessors* of the component with the
-    /// given `component_id`.
+    /// Returns an iterator over the *raw* (graph-direct) predecessors of
+    /// the component with the given `component_id`.
+    ///
+    /// "Raw" means every node connected by an incoming edge, including
+    /// pass-through categories. Most callers want
+    /// [`predecessors`][Self::predecessors] instead, which walks past
+    /// pass-throughs transparently.
     ///
     /// Returns an error if the given `component_id` does not exist.
-    pub fn predecessors(&self, component_id: u64) -> Result<Neighbors<'_, N>, Error> {
+    pub fn raw_predecessors(&self, component_id: u64) -> Result<RawNeighbors<'_, N>, Error> {
+        self.raw_neighbors(component_id, petgraph::Direction::Incoming)
+    }
+
+    /// Returns an iterator over the *raw* (graph-direct) successors of
+    /// the component with the given `component_id`.
+    ///
+    /// "Raw" means every node connected by an outgoing edge, including
+    /// pass-through categories. Most callers want
+    /// [`successors`][Self::successors] instead, which walks past
+    /// pass-throughs transparently.
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub fn raw_successors(&self, component_id: u64) -> Result<RawNeighbors<'_, N>, Error> {
+        self.raw_neighbors(component_id, petgraph::Direction::Outgoing)
+    }
+
+    /// Shared implementation for [`raw_predecessors`][Self::raw_predecessors]
+    /// and [`raw_successors`][Self::raw_successors].
+    fn raw_neighbors(
+        &self,
+        component_id: u64,
+        direction: petgraph::Direction,
+    ) -> Result<RawNeighbors<'_, N>, Error> {
         self.node_indices
             .get(&component_id)
-            .map(|&index| Neighbors {
+            .map(|&index| RawNeighbors {
                 graph: &self.graph,
-                iter: self
-                    .graph
-                    .neighbors_directed(index, petgraph::Direction::Incoming),
+                iter: self.graph.neighbors_directed(index, direction),
             })
             .ok_or_else(|| {
                 Error::component_not_found(format!("Component with id {component_id} not found."))
             })
     }
 
-    /// Returns an iterator over the *successors* of the component with the
-    /// given `component_id`.
+    /// Returns an iterator over the *predecessors* of the component with
+    /// the given `component_id`, walking transparently past pass-through
+    /// categories.
+    ///
+    /// Pass-through nodes are skipped: their non-pass-through ancestors
+    /// take their place in the iterator. For the raw (graph-direct) view
+    /// that includes pass-throughs, use
+    /// [`raw_predecessors`][Self::raw_predecessors].
+    ///
+    /// Returns an error if the given `component_id` does not exist.
+    pub fn predecessors(&self, component_id: u64) -> Result<Neighbors<'_, N>, Error> {
+        self.collect_effective_neighbors(component_id, petgraph::Direction::Incoming)
+    }
+
+    /// Returns an iterator over the *successors* of the component with
+    /// the given `component_id`, walking transparently past pass-through
+    /// categories.
+    ///
+    /// Pass-through nodes are skipped: their non-pass-through descendants
+    /// take their place in the iterator. For the raw (graph-direct) view
+    /// that includes pass-throughs, use
+    /// [`raw_successors`][Self::raw_successors].
     ///
     /// Returns an error if the given `component_id` does not exist.
     pub fn successors(&self, component_id: u64) -> Result<Neighbors<'_, N>, Error> {
-        self.node_indices
-            .get(&component_id)
-            .map(|&index| Neighbors {
-                graph: &self.graph,
-                iter: self
-                    .graph
-                    .neighbors_directed(index, petgraph::Direction::Outgoing),
-            })
-            .ok_or_else(|| {
-                Error::component_not_found(format!("Component with id {component_id} not found."))
-            })
+        self.collect_effective_neighbors(component_id, petgraph::Direction::Outgoing)
+    }
+
+    /// BFS through pass-through nodes in the given direction, collecting
+    /// the first non-pass-through node along each branch.
+    fn collect_effective_neighbors(
+        &self,
+        component_id: u64,
+        direction: petgraph::Direction,
+    ) -> Result<Neighbors<'_, N>, Error> {
+        let start = *self.node_indices.get(&component_id).ok_or_else(|| {
+            Error::component_not_found(format!("Component with id {component_id} not found."))
+        })?;
+
+        let mut queue: VecDeque<NodeIndex> =
+            self.graph.neighbors_directed(start, direction).collect();
+        let mut visited: HashSet<NodeIndex> = HashSet::new();
+        let mut result: Vec<&N> = Vec::new();
+
+        while let Some(idx) = queue.pop_front() {
+            if !visited.insert(idx) {
+                continue;
+            }
+            let node = &self.graph[idx];
+            if node.category().is_passthrough() {
+                queue.extend(self.graph.neighbors_directed(idx, direction));
+            } else {
+                result.push(node);
+            }
+        }
+
+        Ok(Neighbors {
+            iter: result.into_iter(),
+        })
     }
 
     /// Returns an iterator over the *siblings* of the component with the
@@ -130,7 +200,9 @@ where
 
         while let Some(index) = stack.pop() {
             let node = &self.graph[index];
-            if pred(node) {
+            // Pass-through nodes are transparent: skip the predicate
+            // check but follow through their neighbors.
+            if !node.category().is_passthrough() && pred(node) {
                 found.insert(node.component_id());
                 if !follow_after_match {
                     continue;
@@ -365,6 +437,103 @@ mod tests {
             ]
         );
 
+        Ok(())
+    }
+
+    /// `raw_predecessors` / `raw_successors` expose the graph-direct
+    /// view (including pass-through nodes), while `predecessors` /
+    /// `successors` walk past them.
+    ///
+    /// Topology: `Grid → PT → Meter → BatteryInverter → Battery`.
+    #[test]
+    fn test_raw_neighbors_includes_passthroughs() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+
+        // Raw view sees the PT directly.
+        let raw_preds: Vec<u64> = graph
+            .raw_predecessors(meter.component_id())?
+            .map(|n| n.component_id())
+            .collect();
+        assert_eq!(raw_preds, vec![pt.component_id()]);
+
+        let raw_succs: Vec<u64> = graph
+            .raw_successors(grid.component_id())?
+            .map(|n| n.component_id())
+            .collect();
+        assert_eq!(raw_succs, vec![pt.component_id()]);
+
+        // Effective view walks past the PT.
+        let preds: Vec<u64> = graph
+            .predecessors(meter.component_id())?
+            .map(|n| n.component_id())
+            .collect();
+        assert_eq!(preds, vec![grid.component_id()]);
+
+        let succs: Vec<u64> = graph
+            .successors(grid.component_id())?
+            .map(|n| n.component_id())
+            .collect();
+        assert_eq!(succs, vec![meter.component_id()]);
+
+        // Unknown component_id behaves the same as the effective methods.
+        assert!(graph.raw_predecessors(999).is_err());
+        assert!(graph.raw_successors(999).is_err());
+
+        // Make sure the unused `battery` and `inverter` handles aren't
+        // optimised away in unrelated test setup.
+        let _ = (battery, inverter);
+        Ok(())
+    }
+
+    /// `find_all` skips pass-through nodes when checking the predicate
+    /// — even if the predicate would match. This keeps PTs out of
+    /// callers' result sets without forcing them to filter.
+    ///
+    /// Topology: `Grid → PT → Meter`.
+    #[test]
+    fn test_find_all_skips_passthroughs() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+
+        let graph = builder.build(None)?;
+
+        // Predicate matches everything; PT is excluded from the result.
+        let found = graph.find_all(
+            grid.component_id(),
+            |_| true,
+            petgraph::Direction::Outgoing,
+            true,
+        )?;
+        assert_eq!(
+            found,
+            BTreeSet::from([grid.component_id(), meter.component_id()])
+        );
+
+        // Predicate that explicitly tries to match PTs still returns nothing.
+        let found = graph.find_all(
+            grid.component_id(),
+            |n| n.category() == ComponentCategory::PowerTransformer,
+            petgraph::Direction::Outgoing,
+            true,
+        )?;
+        assert!(found.is_empty());
         Ok(())
     }
 
