@@ -4,7 +4,7 @@
 //! This module contains the configuration options for the `ComponentGraph`.
 
 /// Configuration options for the `ComponentGraph`.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct ComponentGraphConfig {
     /// Whether to allow validation errors on components.  When this is `true`,
     /// the graph will be built even if there are validation errors on
@@ -67,4 +67,207 @@ pub struct ComponentGraphConfig {
     /// meters will be secondary.  When `false`, steam boiler meters will be the
     /// primary source.
     pub prefer_steam_boilers_in_steam_boiler_formula: bool,
+
+    /// Default policy for the per-category "component" formulas.
+    ///
+    /// When `true` (the default), the meter measurement is the primary
+    /// source and the device measurement is the fallback for the per-
+    /// category formulas (`battery_formula`, `chp_formula`, `pv_formula`,
+    /// `wind_turbine_formula`, `ev_charger_formula`, `steam_boiler_formula`).
+    /// When `false`, the device is primary and the meter is the fallback.
+    ///
+    /// Per-formula overrides live in [`formula_overrides`][Self::formula_overrides].
+    ///
+    /// Has no effect on `grid_formula`, `consumer_formula`,
+    /// `producer_formula`, or any of the coalesce formulas.
+    pub(crate) prefer_meters_in_component_formulas: bool,
+
+    /// Per-formula overrides for the meter/device preference; see
+    /// [`FormulaOverrides`].
+    pub(crate) formula_overrides: FormulaOverrides,
+}
+
+impl Default for ComponentGraphConfig {
+    fn default() -> Self {
+        Self {
+            allow_component_validation_failures: false,
+            allow_unconnected_components: false,
+            allow_unspecified_inverters: false,
+            disable_fallback_components: false,
+            include_phantom_loads_in_consumer_formula: false,
+            prefer_inverters_in_pv_formula: false,
+            prefer_inverters_in_battery_formula: false,
+            prefer_chp_in_chp_formula: false,
+            prefer_ev_chargers_in_ev_formula: false,
+            prefer_wind_turbines_in_wind_formula: false,
+            prefer_steam_boilers_in_steam_boiler_formula: false,
+            prefer_meters_in_component_formulas: true,
+            formula_overrides: FormulaOverrides::default(),
+        }
+    }
+}
+
+impl ComponentGraphConfig {
+    /// Effective "prefer meters" setting for [`ComponentGraph::pv_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::pv_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_pv_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_pv_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+
+    /// Effective "prefer meters" setting for [`ComponentGraph::battery_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::battery_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_battery_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_battery_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+
+    /// Effective "prefer meters" setting for [`ComponentGraph::chp_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::chp_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_chp_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_chp_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+
+    /// Effective "prefer meters" setting for [`ComponentGraph::ev_charger_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::ev_charger_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_ev_charger_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_ev_charger_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+
+    /// Effective "prefer meters" setting for [`ComponentGraph::wind_turbine_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::wind_turbine_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_wind_turbine_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_wind_turbine_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+
+    /// Effective "prefer meters" setting for [`ComponentGraph::steam_boiler_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::steam_boiler_formula
+    #[allow(dead_code)]
+    pub(crate) fn prefer_meters_in_steam_boiler_formula(&self) -> bool {
+        self.formula_overrides
+            .prefer_meters_in_steam_boiler_formula
+            .unwrap_or(self.prefer_meters_in_component_formulas)
+    }
+}
+
+/// Per-formula overrides for the meter/device preference in the
+/// per-category formulas.
+///
+/// Each field is `None` by default, meaning the corresponding formula
+/// follows the global `prefer_meters_in_component_formulas` setting on
+/// [`ComponentGraphConfig`]. Setting an entry to `Some(true)` forces
+/// the meter as primary for that formula; `Some(false)` forces the
+/// device.
+///
+/// Construct via [`FormulaOverrides::builder`] or
+/// [`FormulaOverrides::default`].
+#[derive(Clone, Default, Debug)]
+pub struct FormulaOverrides {
+    pub(crate) prefer_meters_in_pv_formula: Option<bool>,
+    pub(crate) prefer_meters_in_battery_formula: Option<bool>,
+    pub(crate) prefer_meters_in_chp_formula: Option<bool>,
+    pub(crate) prefer_meters_in_ev_charger_formula: Option<bool>,
+    pub(crate) prefer_meters_in_wind_turbine_formula: Option<bool>,
+    pub(crate) prefer_meters_in_steam_boiler_formula: Option<bool>,
+}
+
+impl FormulaOverrides {
+    /// Returns a [`FormulaOverridesBuilder`] with no overrides set.
+    pub fn builder() -> FormulaOverridesBuilder {
+        FormulaOverridesBuilder::new()
+    }
+}
+
+/// Builder for [`FormulaOverrides`].
+#[derive(Clone, Debug)]
+pub struct FormulaOverridesBuilder {
+    inner: FormulaOverrides,
+}
+
+impl FormulaOverridesBuilder {
+    /// Creates a new builder with no overrides set.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: FormulaOverrides::default(),
+        }
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::pv_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::pv_formula
+    pub fn prefer_meters_in_pv_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_pv_formula = Some(value);
+        self
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::battery_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::battery_formula
+    pub fn prefer_meters_in_battery_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_battery_formula = Some(value);
+        self
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::chp_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::chp_formula
+    pub fn prefer_meters_in_chp_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_chp_formula = Some(value);
+        self
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::ev_charger_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::ev_charger_formula
+    pub fn prefer_meters_in_ev_charger_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_ev_charger_formula = Some(value);
+        self
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::wind_turbine_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::wind_turbine_formula
+    pub fn prefer_meters_in_wind_turbine_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_wind_turbine_formula = Some(value);
+        self
+    }
+
+    /// Override the meter/device preference for
+    /// [`ComponentGraph::steam_boiler_formula`][cg].
+    ///
+    /// [cg]: crate::ComponentGraph::steam_boiler_formula
+    pub fn prefer_meters_in_steam_boiler_formula(mut self, value: bool) -> Self {
+        self.inner.prefer_meters_in_steam_boiler_formula = Some(value);
+        self
+    }
+
+    /// Consumes the builder and returns the resulting [`FormulaOverrides`].
+    pub fn build(self) -> FormulaOverrides {
+        self.inner
+    }
 }
