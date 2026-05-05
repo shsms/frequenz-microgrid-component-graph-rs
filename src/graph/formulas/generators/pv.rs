@@ -63,7 +63,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(!self.graph.config.prefer_inverters_in_pv_formula)
+            .prefer_meters(self.graph.config.prefer_meters_in_pv_formula())
             .generate(self.graph, self.pv_inverter_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -73,7 +73,9 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{ComponentGraphConfig, Error, graph::test_utils::ComponentGraphBuilder};
+    use crate::{
+        ComponentGraphConfig, Error, FormulaOverrides, graph::test_utils::ComponentGraphBuilder,
+    };
 
     #[test]
     fn test_pv_formula() -> Result<(), Error> {
@@ -84,7 +86,9 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let prefer_pv_config = Some(ComponentGraphConfig {
-            prefer_inverters_in_pv_formula: true,
+            formula_overrides: FormulaOverrides::builder()
+                .prefer_meters_in_pv_formula(false)
+                .build(),
             ..ComponentGraphConfig::default()
         });
 

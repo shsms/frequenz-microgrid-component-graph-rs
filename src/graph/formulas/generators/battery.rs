@@ -56,7 +56,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(!self.graph.config.prefer_inverters_in_battery_formula)
+            .prefer_meters(self.graph.config.prefer_meters_in_battery_formula())
             .generate(self.graph, self.inverter_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -95,7 +95,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        ComponentGraphConfig, Error, InverterType, graph::test_utils::ComponentGraphBuilder,
+        ComponentGraphConfig, Error, FormulaOverrides, InverterType,
+        graph::test_utils::ComponentGraphBuilder,
     };
 
     #[test]
@@ -107,7 +108,9 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let prefer_inverters_config = Some(ComponentGraphConfig {
-            prefer_inverters_in_battery_formula: true,
+            formula_overrides: FormulaOverrides::builder()
+                .prefer_meters_in_battery_formula(false)
+                .build(),
             ..Default::default()
         });
 
@@ -228,7 +231,9 @@ mod tests {
 
         let graph = builder.build(Some(ComponentGraphConfig {
             allow_unspecified_inverters: true,
-            prefer_inverters_in_battery_formula: true,
+            formula_overrides: FormulaOverrides::builder()
+                .prefer_meters_in_battery_formula(false)
+                .build(),
             ..Default::default()
         }))?;
         let graph_prefer_meters = builder.build(Some(ComponentGraphConfig {

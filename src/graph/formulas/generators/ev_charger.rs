@@ -63,7 +63,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(!self.graph.config.prefer_ev_chargers_in_ev_formula)
+            .prefer_meters(self.graph.config.prefer_meters_in_ev_charger_formula())
             .generate(self.graph, self.ev_charger_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -84,7 +84,9 @@ mod tests {
         builder.connect(grid, grid_meter);
 
         let prefer_ev_charger_config = Some(crate::ComponentGraphConfig {
-            prefer_ev_chargers_in_ev_formula: true,
+            formula_overrides: crate::FormulaOverrides::builder()
+                .prefer_meters_in_ev_charger_formula(false)
+                .build(),
             ..Default::default()
         });
 

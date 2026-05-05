@@ -111,7 +111,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::pv_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::pv_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_pv_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_pv_formula
@@ -121,7 +120,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::battery_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::battery_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_battery_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_battery_formula
@@ -131,7 +129,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::chp_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::chp_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_chp_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_chp_formula
@@ -141,7 +138,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::ev_charger_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::ev_charger_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_ev_charger_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_ev_charger_formula
@@ -151,7 +147,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::wind_turbine_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::wind_turbine_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_wind_turbine_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_wind_turbine_formula
@@ -161,7 +156,6 @@ impl ComponentGraphConfig {
     /// Effective "prefer meters" setting for [`ComponentGraph::steam_boiler_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::steam_boiler_formula
-    #[allow(dead_code)]
     pub(crate) fn prefer_meters_in_steam_boiler_formula(&self) -> bool {
         self.formula_overrides
             .prefer_meters_in_steam_boiler_formula
