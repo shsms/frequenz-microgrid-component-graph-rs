@@ -35,39 +35,6 @@ pub struct ComponentGraphConfig {
     /// and battery components from the grid measurements.
     pub include_phantom_loads_in_consumer_formula: bool,
 
-    /// Whether to prefer PV inverters when generating PV formulas.  When this
-    /// is `true`, PV inverters will be the primary source and PV meters will be
-    /// the fallback.  When `false`, PV meters will be the primary source.
-    pub prefer_inverters_in_pv_formula: bool,
-
-    /// Whether to prefer battery inverters when generating Battery formulas.
-    /// When this is `true`, battery inverters will be the primary source and
-    /// battery meters will be secondary.  When `false`, battery meters will be
-    /// the primary source.
-    pub prefer_inverters_in_battery_formula: bool,
-
-    /// Whether to prefer CHP when generating CHP formulas.  When this is
-    /// `true`, CHP units will be the primary source and CHP meters will be
-    /// secondary.  When `false`, CHP meters will be the primary source.
-    pub prefer_chp_in_chp_formula: bool,
-
-    /// Whether to prefer EV chargers when generating EV formulas.  When this
-    /// is `true`, EV chargers will be the primary source and EV meters will be
-    /// secondary.  When `false`, EV meters will be the primary source.
-    pub prefer_ev_chargers_in_ev_formula: bool,
-
-    /// Whether to prefer wind turbines when generating Wind formulas.  When
-    /// this is `true`, wind turbines will be the primary source and wind meters
-    /// will be secondary.  When `false`, wind meters will be the primary
-    /// source.
-    pub prefer_wind_turbines_in_wind_formula: bool,
-
-    /// Whether to prefer steam boilers when generating steam boiler formulas.  When
-    /// this is `true`, steam boilers will be the primary source and steam boiler
-    /// meters will be secondary.  When `false`, steam boiler meters will be the
-    /// primary source.
-    pub prefer_steam_boilers_in_steam_boiler_formula: bool,
-
     /// Default policy for the per-category "component" formulas.
     ///
     /// When `true` (the default), the meter measurement is the primary
@@ -95,12 +62,6 @@ impl Default for ComponentGraphConfig {
             allow_unspecified_inverters: false,
             disable_fallback_components: false,
             include_phantom_loads_in_consumer_formula: false,
-            prefer_inverters_in_pv_formula: false,
-            prefer_inverters_in_battery_formula: false,
-            prefer_chp_in_chp_formula: false,
-            prefer_ev_chargers_in_ev_formula: false,
-            prefer_wind_turbines_in_wind_formula: false,
-            prefer_steam_boilers_in_steam_boiler_formula: false,
             prefer_meters_in_component_formulas: true,
             formula_overrides: FormulaOverrides::default(),
         }
