@@ -83,12 +83,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_ev_charger_config = Some(crate::ComponentGraphConfig {
-            formula_overrides: crate::FormulaOverrides::builder()
-                .prefer_meters_in_ev_charger_formula(false)
+        let prefer_ev_charger_config = Some(
+            crate::ComponentGraphConfig::builder()
+                .formula_overrides(
+                    crate::FormulaOverrides::builder()
+                        .prefer_meters_in_ev_charger_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..Default::default()
-        });
+        );
 
         let graph = builder.build(prefer_ev_charger_config.clone())?;
         let formula = graph.ev_charger_formula(None)?.to_string();

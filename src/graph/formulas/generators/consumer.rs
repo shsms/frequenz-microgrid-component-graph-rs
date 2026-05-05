@@ -258,10 +258,11 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
 
         let graph = builder.build(config)?;
         let graph_no_phantom = builder.build(None)?;
@@ -277,10 +278,11 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 2);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
 
         let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
@@ -377,11 +379,12 @@ mod tests {
             )
         );
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            disable_fallback_components: true,
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        }))?;
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .disable_fallback_components(true)
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -395,11 +398,12 @@ mod tests {
                 "COALESCE(MAX(#11 - #8 - #9 - #10, 0.0), 0.0)"
             )
         );
-        let graph_no_phantom = builder.build(Some(ComponentGraphConfig {
-            disable_fallback_components: true,
-            include_phantom_loads_in_consumer_formula: false,
-            ..Default::default()
-        }))?;
+        let graph_no_phantom = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .disable_fallback_components(true)
+                .include_phantom_loads_in_consumer_formula(false)
+                .build(),
+        ))?;
         let formula = graph_no_phantom.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(#1 - #2 - #5 - #8 - #9 - #10, 0.0)");
 
@@ -412,10 +416,11 @@ mod tests {
         assert_eq!(meter_bat_chain.component_id(), 12);
         assert_eq!(dangling_meter.component_id(), 15);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
 
         let graph = builder.build(config)?;
         let formula = graph.consumer_formula()?.to_string();
@@ -472,10 +477,11 @@ mod tests {
 
         assert_eq!(meter_bat_chain.component_id(), 1);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
         let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         // Formula subtracts inverter from battery meter, or shows zero
@@ -580,10 +586,11 @@ mod tests {
         builder.connect(grid, grid_meter_2);
         builder.connect(grid, grid_meter_3);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
 
         let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
@@ -623,10 +630,11 @@ mod tests {
 
         assert_eq!(meter.component_id(), 8);
 
-        let config = Some(ComponentGraphConfig {
-            include_phantom_loads_in_consumer_formula: true,
-            ..Default::default()
-        });
+        let config = Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        );
         let graph = builder.build(config.clone())?;
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(

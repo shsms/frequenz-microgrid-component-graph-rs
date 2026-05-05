@@ -272,10 +272,11 @@ mod tests {
             .generate(&graph, BTreeSet::from([2]))?;
         assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            disable_fallback_components: true,
-            ..Default::default()
-        }))?;
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .disable_fallback_components(true)
+                .build(),
+        ))?;
         let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([1, 2]))?;
         assert_eq!(expr.to_string(), "#1 + #2");
 
@@ -339,10 +340,11 @@ mod tests {
             "COALESCE(#2, #3, 0.0) + COALESCE(#7, 0.0) + COALESCE(#8, 0.0)"
         );
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            disable_fallback_components: true,
-            ..Default::default()
-        }))?;
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .disable_fallback_components(true)
+                .build(),
+        ))?;
         let expr = FallbackExpr::new().generate(&graph, BTreeSet::from([3, 5]))?;
         assert_eq!(expr.to_string(), "#3 + #5");
 

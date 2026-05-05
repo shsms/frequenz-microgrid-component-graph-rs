@@ -107,12 +107,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_inverters_config = Some(ComponentGraphConfig {
-            formula_overrides: FormulaOverrides::builder()
-                .prefer_meters_in_battery_formula(false)
+        let prefer_inverters_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_battery_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..Default::default()
-        });
+        );
 
         let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
@@ -229,17 +232,21 @@ mod tests {
                 == "InvalidComponent: InverterType not specified for inverter: 20")
         );
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            formula_overrides: FormulaOverrides::builder()
-                .prefer_meters_in_battery_formula(false)
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unspecified_inverters(true)
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_battery_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..Default::default()
-        }))?;
-        let graph_prefer_meters = builder.build(Some(ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            ..Default::default()
-        }))?;
+        ))?;
+        let graph_prefer_meters = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unspecified_inverters(true)
+                .build(),
+        ))?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,

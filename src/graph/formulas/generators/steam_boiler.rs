@@ -83,12 +83,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_steam_boiler_config = Some(crate::ComponentGraphConfig {
-            formula_overrides: crate::FormulaOverrides::builder()
-                .prefer_meters_in_steam_boiler_formula(false)
+        let prefer_steam_boiler_config = Some(
+            crate::ComponentGraphConfig::builder()
+                .formula_overrides(
+                    crate::FormulaOverrides::builder()
+                        .prefer_meters_in_steam_boiler_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..Default::default()
-        });
+        );
 
         let graph = builder.build(prefer_steam_boiler_config.clone())?;
         let formula = graph.steam_boiler_formula(None)?.to_string();

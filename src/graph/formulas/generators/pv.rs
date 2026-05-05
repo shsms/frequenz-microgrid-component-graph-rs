@@ -85,12 +85,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_pv_config = Some(ComponentGraphConfig {
-            formula_overrides: FormulaOverrides::builder()
-                .prefer_meters_in_pv_formula(false)
+        let prefer_pv_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_pv_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..ComponentGraphConfig::default()
-        });
+        );
 
         let graph = builder.build(prefer_pv_config.clone())?;
         let formula = graph.pv_formula(None)?.to_string();

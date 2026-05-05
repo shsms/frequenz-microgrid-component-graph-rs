@@ -85,12 +85,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_wind_config = Some(ComponentGraphConfig {
-            formula_overrides: FormulaOverrides::builder()
-                .prefer_meters_in_wind_turbine_formula(false)
+        let prefer_wind_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_wind_turbine_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..Default::default()
-        });
+        );
 
         let graph = builder.build(prefer_wind_config.clone())?;
         let formula = graph.wind_turbine_formula(None)?.to_string();

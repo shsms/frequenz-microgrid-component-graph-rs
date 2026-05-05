@@ -192,10 +192,9 @@ mod tests {
         ));
         // With `allow_unspecified_inverters=true`, unspecified inverter types
         // are treated as battery inverters.
-        let unspec_inv_config = ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            ..Default::default()
-        };
+        let unspec_inv_config = ComponentGraphConfig::builder()
+            .allow_unspecified_inverters(true)
+            .build();
 
         assert!(builder.build(Some(unspec_inv_config.clone())).is_ok());
 

@@ -82,12 +82,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_chp_config = Some(ComponentGraphConfig {
-            formula_overrides: FormulaOverrides::builder()
-                .prefer_meters_in_chp_formula(false)
+        let prefer_chp_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_chp_formula(false)
+                        .build(),
+                )
                 .build(),
-            ..ComponentGraphConfig::default()
-        });
+        );
 
         let graph = builder.build(prefer_chp_config.clone())?;
         let formula = graph.chp_formula(None)?.to_string();
