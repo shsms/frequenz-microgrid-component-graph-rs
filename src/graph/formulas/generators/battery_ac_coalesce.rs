@@ -189,10 +189,11 @@ mod tests {
                 == "InvalidComponent: InverterType not specified for inverter: 20")
         );
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            ..Default::default()
-        }))?;
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unspecified_inverters(true)
+                .build(),
+        ))?;
         let formula = graph.battery_ac_coalesce_formula(None)?.to_string();
         assert_eq!(
             formula,

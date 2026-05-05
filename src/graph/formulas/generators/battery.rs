@@ -56,7 +56,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(!self.graph.config.prefer_inverters_in_battery_formula)
+            .prefer_meters(self.graph.config.prefer_meters_in_battery_formula())
             .generate(self.graph, self.inverter_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -95,7 +95,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        ComponentGraphConfig, Error, InverterType, graph::test_utils::ComponentGraphBuilder,
+        ComponentGraphConfig, Error, FormulaOverrides, InverterType,
+        graph::test_utils::ComponentGraphBuilder,
     };
 
     #[test]
@@ -106,10 +107,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_inverters_config = Some(ComponentGraphConfig {
-            prefer_inverters_in_battery_formula: true,
-            ..Default::default()
-        });
+        let prefer_inverters_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_battery_formula(false)
+                        .build(),
+                )
+                .build(),
+        );
 
         let graph = builder.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
@@ -226,15 +232,21 @@ mod tests {
                 == "InvalidComponent: InverterType not specified for inverter: 20")
         );
 
-        let graph = builder.build(Some(ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            prefer_inverters_in_battery_formula: true,
-            ..Default::default()
-        }))?;
-        let graph_prefer_meters = builder.build(Some(ComponentGraphConfig {
-            allow_unspecified_inverters: true,
-            ..Default::default()
-        }))?;
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unspecified_inverters(true)
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_battery_formula(false)
+                        .build(),
+                )
+                .build(),
+        ))?;
+        let graph_prefer_meters = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unspecified_inverters(true)
+                .build(),
+        ))?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,

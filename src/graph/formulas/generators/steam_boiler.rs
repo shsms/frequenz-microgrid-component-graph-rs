@@ -63,12 +63,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(
-                !self
-                    .graph
-                    .config
-                    .prefer_steam_boilers_in_steam_boiler_formula,
-            )
+            .prefer_meters(self.graph.config.prefer_meters_in_steam_boiler_formula())
             .generate(self.graph, self.steam_boiler_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -88,10 +83,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_steam_boiler_config = Some(crate::ComponentGraphConfig {
-            prefer_steam_boilers_in_steam_boiler_formula: true,
-            ..Default::default()
-        });
+        let prefer_steam_boiler_config = Some(
+            crate::ComponentGraphConfig::builder()
+                .formula_overrides(
+                    crate::FormulaOverrides::builder()
+                        .prefer_meters_in_steam_boiler_formula(false)
+                        .build(),
+                )
+                .build(),
+        );
 
         let graph = builder.build(prefer_steam_boiler_config.clone())?;
         let formula = graph.steam_boiler_formula(None)?.to_string();

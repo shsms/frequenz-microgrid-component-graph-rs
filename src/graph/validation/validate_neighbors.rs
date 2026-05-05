@@ -308,10 +308,9 @@ r#"InvalidGraph: Multiple validation failures:
             ComponentGraph::try_new(
                 components.clone(),
                 connections.clone(),
-                ComponentGraphConfig {
-                    allow_component_validation_failures: true,
-                    ..config.clone()
-                }
+                ComponentGraphConfig::builder()
+                    .allow_component_validation_failures(true)
+                    .build(),
             )
             .is_ok()
         );

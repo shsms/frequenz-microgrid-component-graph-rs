@@ -63,7 +63,7 @@ where
         }
 
         FallbackExpr::new()
-            .prefer_meters(!self.graph.config.prefer_wind_turbines_in_wind_formula)
+            .prefer_meters(self.graph.config.prefer_meters_in_wind_turbine_formula())
             .generate(self.graph, self.wind_turbine_ids.clone())
             .map(AggregationFormula::new)
     }
@@ -73,7 +73,9 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{ComponentGraphConfig, Error, graph::test_utils::ComponentGraphBuilder};
+    use crate::{
+        ComponentGraphConfig, Error, FormulaOverrides, graph::test_utils::ComponentGraphBuilder,
+    };
 
     #[test]
     fn test_wind_turbine_formula() -> Result<(), Error> {
@@ -83,10 +85,15 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
-        let prefer_wind_config = Some(ComponentGraphConfig {
-            prefer_wind_turbines_in_wind_formula: true,
-            ..Default::default()
-        });
+        let prefer_wind_config = Some(
+            ComponentGraphConfig::builder()
+                .formula_overrides(
+                    FormulaOverrides::builder()
+                        .prefer_meters_in_wind_turbine_formula(false)
+                        .build(),
+                )
+                .build(),
+        );
 
         let graph = builder.build(prefer_wind_config.clone())?;
         let formula = graph.wind_turbine_formula(None)?.to_string();

@@ -170,10 +170,9 @@ mod tests {
             ComponentGraph::try_new(
                 components.clone(),
                 connections.clone(),
-                ComponentGraphConfig {
-                    allow_unconnected_components: true,
-                    ..config.clone()
-                }
+                ComponentGraphConfig::builder()
+                    .allow_unconnected_components(true)
+                    .build(),
             )
             .is_ok()
         );
