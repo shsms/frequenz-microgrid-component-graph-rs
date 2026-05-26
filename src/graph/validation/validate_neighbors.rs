@@ -5,7 +5,8 @@
 //! connected correctly.
 
 use crate::{
-    ComponentCategory, Edge, Error, InverterType, Node, component_category::CategoryPredicates,
+    ComponentCategory, Edge, Error, InverterType, Node, ValidationError,
+    component_category::CategoryPredicates,
 };
 
 use super::ComponentGraphValidator;
@@ -80,10 +81,14 @@ where
                 }
                 InverterType::Unspecified => {
                     if !self.cg.config.allow_unspecified_inverters {
-                        return Err(Error::invalid_graph(format!(
-                            "Inverter {} has an unspecified inverter type.",
-                            inverter.component_id()
-                        )));
+                        return Err(ValidationError::new(
+                            format!(
+                                "Inverter {} has an unspecified inverter type.",
+                                inverter.component_id()
+                            ),
+                            [inverter.component_id()],
+                        )
+                        .into());
                     } else {
                         tracing::debug!(
                             concat!(
@@ -170,7 +175,7 @@ mod tests {
     use crate::InverterType;
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection, validation_error};
 
     #[test]
     fn test_validate_root() {
@@ -189,7 +194,10 @@ mod tests {
         let connections: Vec<TestConnection> = vec![];
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph("GridConnectionPoint:1 must have at least one successor.")
+                e == validation_error(
+                    "GridConnectionPoint:1 must have at least one successor.",
+                    &[1],
+                )
             }),
         );
 
@@ -206,10 +214,13 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph(concat!(
-                    "GridConnectionPoint:1 can't have successors with ",
-                    "multiple predecessors. Found Meter:3."
-                ))
+                e == validation_error(
+                    concat!(
+                        "GridConnectionPoint:1 can't have successors with ",
+                        "multiple predecessors. Found Meter:3."
+                    ),
+                    &[1, 3],
+                )
             }),
         );
     }
@@ -223,13 +234,28 @@ mod tests {
             TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
         ];
         let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
-        assert!(
-            ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e.to_string() ==
-r#"InvalidGraph: Multiple validation failures:
-    InvalidGraph: Meter:2 can only have successors that are not Batteries. Found Battery(LiIon):3.
-    InvalidGraph: Battery(LiIon):3 can only have predecessors that are BatteryInverters or HybridInverters. Found Meter:2."#
-            }));
+
+        let Err(error) = ComponentGraph::try_new(components, connections, config.clone()) else {
+            panic!("expected validation to fail");
+        };
+        // A single bad meter -> battery edge trips two neighbor rules, which are
+        // collected together rather than flattened into one string.
+        assert_eq!(
+            error,
+            Error::validation_errors(vec![
+                ValidationError::new(
+                    "Meter:2 can only have successors that are not Batteries. Found Battery(LiIon):3.",
+                    [2, 3],
+                ),
+                ValidationError::new(
+                    concat!(
+                        "Battery(LiIon):3 can only have predecessors that are ",
+                        "BatteryInverters or HybridInverters. Found Meter:2."
+                    ),
+                    [3, 2],
+                ),
+            ]),
+        );
     }
 
     #[test]
@@ -252,11 +278,13 @@ r#"InvalidGraph: Multiple validation failures:
             panic!()
         };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph(
-                    "BatteryInverter:3 can only have successors that are Batteries. Found WindTurbine:4.",
-                )
-            }),
+            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+                .is_err_and(|e| {
+                    e == validation_error(
+                        "BatteryInverter:3 can only have successors that are Batteries. Found WindTurbine:4.",
+                        &[3, 4],
+                    )
+                }),
             "{}",
             err
         );
@@ -267,7 +295,10 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph("BatteryInverter:3 must have at least one successor.")
+                    e == validation_error(
+                        "BatteryInverter:3 must have at least one successor.",
+                        &[3],
+                    )
                 }),
         );
 
@@ -298,8 +329,9 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(
+                    e == validation_error(
                         "PvInverter:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );
@@ -338,10 +370,13 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(concat!(
-                        "HybridInverter:3 can only have successors that are Batteries. ",
-                        "Found WindTurbine:4."
-                    ))
+                    e == validation_error(
+                        concat!(
+                            "HybridInverter:3 can only have successors that are Batteries. ",
+                            "Found WindTurbine:4."
+                        ),
+                        &[3, 4],
+                    )
                 }),
         );
 
@@ -381,8 +416,9 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(
+                    e == validation_error(
                         "Battery(NaIon):4 can't have any successors. Found Battery(LiIon):5.",
+                        &[4, 5],
                     )
                 }),
         );
@@ -420,10 +456,13 @@ r#"InvalidGraph: Multiple validation failures:
 
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == Error::invalid_graph(concat!(
-                    "Battery(LiIon):2 can only have predecessors that are ",
-                    "BatteryInverters or HybridInverters. Found GridConnectionPoint:1."
-                ))
+                e == validation_error(
+                    concat!(
+                        "Battery(LiIon):2 can only have predecessors that are ",
+                        "BatteryInverters or HybridInverters. Found GridConnectionPoint:1."
+                    ),
+                    &[2, 1],
+                )
             }),
         );
     }
@@ -445,8 +484,9 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(
+                    e == validation_error(
                         "EVCharger(DC):3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );
@@ -474,8 +514,9 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(
+                    e == validation_error(
                         "CHP:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );
@@ -503,8 +544,9 @@ r#"InvalidGraph: Multiple validation failures:
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == Error::invalid_graph(
+                    e == validation_error(
                         "SteamBoiler:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );

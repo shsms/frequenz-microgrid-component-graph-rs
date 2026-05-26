@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::{Edge, Error, Node};
+use crate::{Edge, Error, Node, ValidationError};
 
 use super::ComponentGraphValidator;
 
@@ -45,9 +45,11 @@ where
             .collect::<Vec<_>>();
 
         if !unvisited.is_empty() {
-            return Err(Error::invalid_graph(format!(
-                "Nodes {unvisited:?} are not connected to the root."
-            )));
+            return Err(ValidationError::new(
+                format!("Nodes {unvisited:?} are not connected to the root."),
+                unvisited,
+            )
+            .into());
         }
 
         Ok(())
@@ -70,15 +72,20 @@ where
                 .iter()
                 .position(|id| *id == successor.component_id())
             {
-                return Err(Error::invalid_graph(format!(
-                    "Cycle detected: {} -> {}",
-                    predecessors[first_occurrence..]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" -> "),
-                    successor.component_id()
-                )));
+                let cycle = &predecessors[first_occurrence..];
+                return Err(ValidationError::new(
+                    format!(
+                        "Cycle detected: {} -> {}",
+                        cycle
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" -> "),
+                        successor.component_id()
+                    ),
+                    cycle.to_vec(),
+                )
+                .into());
             }
             self.validate_acyclicity(successor, predecessors.clone())?;
         }
@@ -88,13 +95,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::ComponentGraphConfig;
     use crate::InverterType;
     use crate::component_category::BatteryType;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection, validation_error};
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
@@ -142,7 +148,7 @@ mod tests {
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(
-                    |e| e == Error::invalid_graph("Nodes [11] are not connected to the root.")
+                    |e| e == validation_error("Nodes [11] are not connected to the root.", &[11])
                 ),
             "{err:?}"
         );
@@ -151,9 +157,11 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
-                )
+                .is_err_and(|e| e
+                    == validation_error(
+                        "Nodes [11, 12] are not connected to the root.",
+                        &[11, 12]
+                    ))
         );
 
         connections.push(TestConnection::new(11, 12));
@@ -161,9 +169,11 @@ mod tests {
         // With the default config, this fails validation.
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == Error::invalid_graph("Nodes [11, 12] are not connected to the root.")
-                )
+                .is_err_and(|e| e
+                    == validation_error(
+                        "Nodes [11, 12] are not connected to the root.",
+                        &[11, 12]
+                    ))
         );
         // With `allow_unconnected_components=true`, this passes validation.
         assert!(
@@ -201,49 +211,54 @@ mod tests {
         connections.push(TestConnection::new(3, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 2")),
+                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 2", &[2, 3])),
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 4 -> 2"))
+                .is_err_and(
+                    |e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 2", &[2, 3, 4])
+                )
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2"))
+                .is_err_and(|e| e
+                    == validation_error("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2", &[2, 3, 4, 5]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 3));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 3 -> 4 -> 3"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 3 -> 4 -> 3", &[3, 4]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 3));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 3 -> 4 -> 5 -> 3"))
+                .is_err_and(
+                    |e| e == validation_error("Cycle detected: 3 -> 4 -> 5 -> 3", &[3, 4, 5])
+                )
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 4));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 4 -> 5 -> 4"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 4 -> 5 -> 4", &[4, 5]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(9, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == Error::invalid_graph("Cycle detected: 2 -> 9 -> 2"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 9 -> 2", &[2, 9]))
         );
 
         connections.pop();
@@ -251,5 +266,26 @@ mod tests {
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_ok()
         );
+    }
+
+    /// A tolerated component-rule violation must not cancel out an
+    /// unconnected-component failure that is *not* tolerated: the checks'
+    /// outcomes are combined, not overwritten by whichever runs last.
+    #[test]
+    fn test_tolerated_failure_does_not_mask_a_fatal_one() {
+        let components = vec![
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
+            // Node 4 is left unconnected, which is not tolerated by default.
+            TestComponent::new(4, ComponentCategory::Meter),
+        ];
+        // The meter -> battery edge breaks a neighbor rule, which *is* tolerated.
+        let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
+        let config = ComponentGraphConfig::builder()
+            .allow_component_validation_failures(true)
+            .build();
+
+        assert!(ComponentGraph::try_new(components, connections, config).is_err());
     }
 }
