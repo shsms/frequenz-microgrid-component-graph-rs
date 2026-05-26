@@ -7,7 +7,12 @@
 //! graph.
 
 /// The kind of an [`Error`].
+///
+/// Marked `#[non_exhaustive]`: matching on this enum from outside the crate
+/// must include a wildcard arm, so future kinds can be added without a
+/// breaking change.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ErrorKind {
     /// No component was found for a given component ID.
     ComponentNotFound,
