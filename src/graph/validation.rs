@@ -42,7 +42,7 @@ where
 
         if let Err(err) = validator.validate_connected_graph(root) {
             errors.push(err);
-            validation_failed = !self.config.allow_unconnected_components;
+            validation_failed |= !self.config.allow_unconnected_components;
         }
 
         for result in [
@@ -56,7 +56,7 @@ where
         ] {
             if let Err(e) = result {
                 errors.push(e);
-                validation_failed = !self.config.allow_component_validation_failures;
+                validation_failed |= !self.config.allow_component_validation_failures;
             }
         }
         match errors.len() {

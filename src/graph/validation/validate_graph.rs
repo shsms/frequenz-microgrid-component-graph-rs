@@ -252,4 +252,25 @@ mod tests {
                 .is_ok()
         );
     }
+
+    /// A tolerated component-rule violation must not cancel out an
+    /// unconnected-component failure that is *not* tolerated: the checks'
+    /// outcomes are combined, not overwritten by whichever runs last.
+    #[test]
+    fn test_tolerated_failure_does_not_mask_a_fatal_one() {
+        let components = vec![
+            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
+            TestComponent::new(2, ComponentCategory::Meter),
+            TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
+            // Node 4 is left unconnected, which is not tolerated by default.
+            TestComponent::new(4, ComponentCategory::Meter),
+        ];
+        // The meter -> battery edge breaks a neighbor rule, which *is* tolerated.
+        let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
+        let config = ComponentGraphConfig::builder()
+            .allow_component_validation_failures(true)
+            .build();
+
+        assert!(ComponentGraph::try_new(components, connections, config).is_err());
+    }
 }
