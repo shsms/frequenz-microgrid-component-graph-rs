@@ -13,7 +13,7 @@ mod graph_traits;
 pub use graph_traits::{Edge, Node};
 
 mod error;
-pub use error::Error;
+pub use error::{Error, ErrorKind};
 
 mod config;
 pub use config::{

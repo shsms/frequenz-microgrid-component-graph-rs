@@ -4,13 +4,23 @@
 //! This module defines the `Error` struct and the `ErrorKind` enum, which are
 //! used to represent errors that can occur in the library.
 
-/// The kind of error that occurred.
+/// The kind of an [`Error`].
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ErrorKind {
+pub enum ErrorKind {
+    /// No component was found for a given component ID.
     ComponentNotFound,
+
+    /// An internal invariant of the library was violated. This indicates a bug.
     Internal,
+
+    /// A component is invalid, e.g. it has an unspecified category.
     InvalidComponent,
+
+    /// A connection between two components is invalid.
     InvalidConnection,
+
+    /// The graph is structurally invalid, e.g. it has no grid component,
+    /// several grid components, or a duplicate component ID.
     InvalidGraph,
 }
 
@@ -33,6 +43,13 @@ impl std::fmt::Display for ErrorKind {
 pub struct Error {
     kind: ErrorKind,
     desc: String,
+}
+
+impl Error {
+    /// Returns the [`ErrorKind`] of this error.
+    pub fn kind(&self) -> &ErrorKind {
+        &self.kind
+    }
 }
 
 /// Constructors for [`Error`].
