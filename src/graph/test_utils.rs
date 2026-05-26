@@ -15,9 +15,9 @@ use crate::{
 };
 
 /// Builds the [`Error`] that validation returns when it collects a single
-/// failure with the given message.
-pub(super) fn validation_error(message: &str) -> Error {
-    Error::validation_errors(vec![ValidationError::new(message)])
+/// failure with the given message and affected component IDs.
+pub(super) fn validation_error(message: &str, component_ids: &[u64]) -> Error {
+    Error::validation_errors(vec![ValidationError::new(message, component_ids.to_vec())])
 }
 
 #[derive(Clone, Debug, PartialEq)]

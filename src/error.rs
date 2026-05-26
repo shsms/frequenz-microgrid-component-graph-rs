@@ -155,22 +155,33 @@ impl std::error::Error for Error {}
 ///
 /// Validation collects every failure rather than stopping at the first one, so
 /// a single graph can yield many of these (see [`ErrorKind::ValidationErrors`]).
+/// Besides a human-readable [`message`][Self::message], each failure exposes the
+/// [`component_ids`][Self::component_ids] it involves, so callers can act on the
+/// affected components without parsing the message text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationError {
     message: String,
+    component_ids: Vec<u64>,
 }
 
 impl ValidationError {
-    /// Creates a new validation error from a message.
-    pub(crate) fn new(message: impl Into<String>) -> Self {
+    /// Creates a new validation error from a message and the IDs of the
+    /// components it involves.
+    pub(crate) fn new(message: impl Into<String>, component_ids: impl Into<Vec<u64>>) -> Self {
         Self {
             message: message.into(),
+            component_ids: component_ids.into(),
         }
     }
 
     /// A human-readable description of the failure.
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// The IDs of the components involved in the failure.
+    pub fn component_ids(&self) -> &[u64] {
+        &self.component_ids
     }
 }
 
@@ -193,9 +204,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validation_error_displays_its_message() {
-        let error = ValidationError::new("boom");
+    fn validation_error_exposes_its_message_and_components() {
+        let error = ValidationError::new("boom", [3u64, 4]);
         assert_eq!(error.message(), "boom");
+        assert_eq!(error.component_ids(), &[3, 4]);
+        // `Display` is just the message.
         assert_eq!(error.to_string(), "boom");
     }
 
@@ -210,8 +223,8 @@ mod tests {
     #[test]
     fn validation_errors_display_lists_each_failure() {
         let error = Error::validation_errors(vec![
-            ValidationError::new("first problem"),
-            ValidationError::new("second problem"),
+            ValidationError::new("first problem", [1u64]),
+            ValidationError::new("second problem", [2u64, 3]),
         ]);
         assert_eq!(
             error.to_string(),
@@ -221,10 +234,10 @@ mod tests {
 
     #[test]
     fn into_validation_errors_unwraps_the_collected_failures() {
-        let error: Error = ValidationError::new("boom").into();
+        let error: Error = ValidationError::new("boom", [1u64]).into();
         assert_eq!(
             error.into_validation_errors(),
-            Ok(vec![ValidationError::new("boom")])
+            Ok(vec![ValidationError::new("boom", [1u64])])
         );
     }
 

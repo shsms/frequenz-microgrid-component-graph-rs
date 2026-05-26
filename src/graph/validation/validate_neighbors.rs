@@ -81,10 +81,13 @@ where
                 }
                 InverterType::Unspecified => {
                     if !self.cg.config.allow_unspecified_inverters {
-                        return Err(ValidationError::new(format!(
-                            "Inverter {} has an unspecified inverter type.",
-                            inverter.component_id()
-                        ))
+                        return Err(ValidationError::new(
+                            format!(
+                                "Inverter {} has an unspecified inverter type.",
+                                inverter.component_id()
+                            ),
+                            [inverter.component_id()],
+                        )
                         .into());
                     } else {
                         tracing::debug!(
@@ -191,7 +194,10 @@ mod tests {
         let connections: Vec<TestConnection> = vec![];
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == validation_error("GridConnectionPoint:1 must have at least one successor.")
+                e == validation_error(
+                    "GridConnectionPoint:1 must have at least one successor.",
+                    &[1],
+                )
             }),
         );
 
@@ -208,10 +214,13 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == validation_error(concat!(
-                    "GridConnectionPoint:1 can't have successors with ",
-                    "multiple predecessors. Found Meter:3."
-                ))
+                e == validation_error(
+                    concat!(
+                        "GridConnectionPoint:1 can't have successors with ",
+                        "multiple predecessors. Found Meter:3."
+                    ),
+                    &[1, 3],
+                )
             }),
         );
     }
@@ -235,12 +244,16 @@ mod tests {
             error,
             Error::validation_errors(vec![
                 ValidationError::new(
-                    "Meter:2 can only have successors that are not Batteries. Found Battery(LiIon):3."
+                    "Meter:2 can only have successors that are not Batteries. Found Battery(LiIon):3.",
+                    [2, 3],
                 ),
-                ValidationError::new(concat!(
-                    "Battery(LiIon):3 can only have predecessors that are ",
-                    "BatteryInverters or HybridInverters. Found Meter:2."
-                )),
+                ValidationError::new(
+                    concat!(
+                        "Battery(LiIon):3 can only have predecessors that are ",
+                        "BatteryInverters or HybridInverters. Found Meter:2."
+                    ),
+                    [3, 2],
+                ),
             ]),
         );
     }
@@ -269,6 +282,7 @@ mod tests {
                 .is_err_and(|e| {
                     e == validation_error(
                         "BatteryInverter:3 can only have successors that are Batteries. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
             "{}",
@@ -281,7 +295,10 @@ mod tests {
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == validation_error("BatteryInverter:3 must have at least one successor.")
+                    e == validation_error(
+                        "BatteryInverter:3 must have at least one successor.",
+                        &[3],
+                    )
                 }),
         );
 
@@ -314,6 +331,7 @@ mod tests {
                 .is_err_and(|e| {
                     e == validation_error(
                         "PvInverter:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );
@@ -352,10 +370,13 @@ mod tests {
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == validation_error(concat!(
-                        "HybridInverter:3 can only have successors that are Batteries. ",
-                        "Found WindTurbine:4."
-                    ))
+                    e == validation_error(
+                        concat!(
+                            "HybridInverter:3 can only have successors that are Batteries. ",
+                            "Found WindTurbine:4."
+                        ),
+                        &[3, 4],
+                    )
                 }),
         );
 
@@ -397,6 +418,7 @@ mod tests {
                 .is_err_and(|e| {
                     e == validation_error(
                         "Battery(NaIon):4 can't have any successors. Found Battery(LiIon):5.",
+                        &[4, 5],
                     )
                 }),
         );
@@ -434,10 +456,13 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components, connections, config.clone()).is_err_and(|e| {
-                e == validation_error(concat!(
-                    "Battery(LiIon):2 can only have predecessors that are ",
-                    "BatteryInverters or HybridInverters. Found GridConnectionPoint:1."
-                ))
+                e == validation_error(
+                    concat!(
+                        "Battery(LiIon):2 can only have predecessors that are ",
+                        "BatteryInverters or HybridInverters. Found GridConnectionPoint:1."
+                    ),
+                    &[2, 1],
+                )
             }),
         );
     }
@@ -461,6 +486,7 @@ mod tests {
                 .is_err_and(|e| {
                     e == validation_error(
                         "EVCharger(DC):3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );
@@ -488,7 +514,10 @@ mod tests {
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
                 .is_err_and(|e| {
-                    e == validation_error("CHP:3 can't have any successors. Found WindTurbine:4.")
+                    e == validation_error(
+                        "CHP:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
+                    )
                 }),
         );
 
@@ -517,6 +546,7 @@ mod tests {
                 .is_err_and(|e| {
                     e == validation_error(
                         "SteamBoiler:3 can't have any successors. Found WindTurbine:4.",
+                        &[3, 4],
                     )
                 }),
         );

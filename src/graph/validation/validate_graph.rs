@@ -45,9 +45,10 @@ where
             .collect::<Vec<_>>();
 
         if !unvisited.is_empty() {
-            return Err(ValidationError::new(format!(
-                "Nodes {unvisited:?} are not connected to the root."
-            ))
+            return Err(ValidationError::new(
+                format!("Nodes {unvisited:?} are not connected to the root."),
+                unvisited,
+            )
             .into());
         }
 
@@ -71,15 +72,19 @@ where
                 .iter()
                 .position(|id| *id == successor.component_id())
             {
-                return Err(ValidationError::new(format!(
-                    "Cycle detected: {} -> {}",
-                    predecessors[first_occurrence..]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" -> "),
-                    successor.component_id()
-                ))
+                let cycle = &predecessors[first_occurrence..];
+                return Err(ValidationError::new(
+                    format!(
+                        "Cycle detected: {} -> {}",
+                        cycle
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" -> "),
+                        successor.component_id()
+                    ),
+                    cycle.to_vec(),
+                )
                 .into());
             }
             self.validate_acyclicity(successor, predecessors.clone())?;
@@ -142,7 +147,9 @@ mod tests {
         };
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Nodes [11] are not connected to the root.")),
+                .is_err_and(
+                    |e| e == validation_error("Nodes [11] are not connected to the root.", &[11])
+                ),
             "{err:?}"
         );
 
@@ -150,9 +157,11 @@ mod tests {
 
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == validation_error("Nodes [11, 12] are not connected to the root.")
-                )
+                .is_err_and(|e| e
+                    == validation_error(
+                        "Nodes [11, 12] are not connected to the root.",
+                        &[11, 12]
+                    ))
         );
 
         connections.push(TestConnection::new(11, 12));
@@ -160,9 +169,11 @@ mod tests {
         // With the default config, this fails validation.
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == validation_error("Nodes [11, 12] are not connected to the root.")
-                )
+                .is_err_and(|e| e
+                    == validation_error(
+                        "Nodes [11, 12] are not connected to the root.",
+                        &[11, 12]
+                    ))
         );
         // With `allow_unconnected_components=true`, this passes validation.
         assert!(
@@ -200,49 +211,54 @@ mod tests {
         connections.push(TestConnection::new(3, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 2")),
+                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 2", &[2, 3])),
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 2"))
+                .is_err_and(
+                    |e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 2", &[2, 3, 4])
+                )
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2"))
+                .is_err_and(|e| e
+                    == validation_error("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2", &[2, 3, 4, 5]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(4, 3));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 3 -> 4 -> 3"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 3 -> 4 -> 3", &[3, 4]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 3));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 3 -> 4 -> 5 -> 3"))
+                .is_err_and(
+                    |e| e == validation_error("Cycle detected: 3 -> 4 -> 5 -> 3", &[3, 4, 5])
+                )
         );
 
         connections.pop();
         connections.push(TestConnection::new(5, 4));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 4 -> 5 -> 4"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 4 -> 5 -> 4", &[4, 5]))
         );
 
         connections.pop();
         connections.push(TestConnection::new(9, 2));
         assert!(
             ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 9 -> 2"))
+                .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 9 -> 2", &[2, 9]))
         );
 
         connections.pop();
