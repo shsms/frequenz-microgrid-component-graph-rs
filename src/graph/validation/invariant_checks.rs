@@ -3,7 +3,7 @@
 
 //! Helper methods for checking invariants of a [`ComponentGraph`].
 
-use crate::{Edge, Error, Node};
+use crate::{Edge, Error, Node, ValidationError};
 
 use super::ComponentGraphValidator;
 
@@ -15,13 +15,14 @@ where
     /// Checks that the given node is a leaf node.
     pub(super) fn ensure_leaf(&self, node: &N) -> Result<(), Error> {
         if let Some(successor) = self.cg.successors(node.component_id())?.next() {
-            return Err(Error::invalid_graph(format!(
+            return Err(ValidationError::new(format!(
                 "{}:{} can't have any successors. Found {}:{}.",
                 node.category(),
                 node.component_id(),
                 successor.category(),
                 successor.component_id()
-            )));
+            ))
+            .into());
         }
         Ok(())
     }
@@ -29,11 +30,12 @@ where
     /// Checks that the given node is *not* a leaf node.
     pub(super) fn ensure_not_leaf(&self, node: &N) -> Result<(), Error> {
         if self.cg.successors(node.component_id())?.next().is_none() {
-            return Err(Error::invalid_graph(format!(
+            return Err(ValidationError::new(format!(
                 "{}:{} must have at least one successor.",
                 node.category(),
                 node.component_id()
-            )));
+            ))
+            .into());
         }
         Ok(())
     }
@@ -41,13 +43,14 @@ where
     /// Checks that the given node is a root node.
     pub(super) fn ensure_root(&self, node: &N) -> Result<(), Error> {
         if let Some(predecessor) = self.cg.predecessors(node.component_id())?.next() {
-            return Err(Error::invalid_graph(format!(
+            return Err(ValidationError::new(format!(
                 "{}:{} can't have any predecessors. Found {}:{}.",
                 node.category(),
                 node.component_id(),
                 predecessor.category(),
                 predecessor.component_id()
-            )));
+            ))
+            .into());
         }
         Ok(())
     }
@@ -61,14 +64,15 @@ where
     ) -> Result<(), Error> {
         for predecessor in self.cg.predecessors(node.component_id())? {
             if !predicate(predecessor) {
-                return Err(Error::invalid_graph(format!(
+                return Err(ValidationError::new(format!(
                     "{}:{} can only have predecessors that are {}. Found {}:{}.",
                     node.category(),
                     node.component_id(),
                     failure_message,
                     predecessor.category(),
                     predecessor.component_id()
-                )));
+                ))
+                .into());
             }
         }
         Ok(())
@@ -83,14 +87,15 @@ where
     ) -> Result<(), Error> {
         for successor in self.cg.successors(node.component_id())? {
             if !predicate(successor) {
-                return Err(Error::invalid_graph(format!(
+                return Err(ValidationError::new(format!(
                     "{}:{} can only have successors that are {}. Found {}:{}.",
                     node.category(),
                     node.component_id(),
                     failure_message,
                     successor.category(),
                     successor.component_id()
-                )));
+                ))
+                .into());
             }
         }
         Ok(())
@@ -103,13 +108,14 @@ where
     pub(super) fn ensure_exclusive_successors(&self, node: &N) -> Result<(), Error> {
         for successor in self.cg.successors(node.component_id())? {
             if self.cg.predecessors(successor.component_id())?.count() > 1 {
-                return Err(Error::invalid_graph(format!(
+                return Err(ValidationError::new(format!(
                     "{}:{} can't have successors with multiple predecessors. Found {}:{}.",
                     node.category(),
                     node.component_id(),
                     successor.category(),
                     successor.component_id()
-                )));
+                ))
+                .into());
             }
         }
         Ok(())

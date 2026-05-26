@@ -11,8 +11,14 @@
 
 use crate::{
     BatteryType, ComponentCategory, ComponentGraph, ComponentGraphConfig, Edge, Error,
-    EvChargerType, InverterType, Node,
+    EvChargerType, InverterType, Node, ValidationError,
 };
+
+/// Builds the [`Error`] that validation returns when it collects a single
+/// failure with the given message.
+pub(super) fn validation_error(message: &str) -> Error {
+    Error::validation_errors(vec![ValidationError::new(message)])
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct TestComponent(u64, ComponentCategory);

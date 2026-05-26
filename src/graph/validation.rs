@@ -33,16 +33,17 @@ where
 
         let validator = ComponentGraphValidator { cg: self, root };
 
-        // Fail immediately if there are cycles in the graph, as this may cause
-        // subsequent validations to get stuck in an infinite loop.
+        // Reject cycles before anything else: the remaining checks walk the
+        // graph and would loop forever on a cyclic one. A detected cycle
+        // short-circuits here, as does any internal failure during traversal.
         validator.validate_acyclicity(root, vec![])?;
 
         let mut errors = vec![];
-        let mut validation_failed = false;
+        let mut fatal = false;
 
-        if let Err(err) = validator.validate_connected_graph(root) {
-            errors.push(err);
-            validation_failed |= !self.config.allow_unconnected_components;
+        if let Err(error) = validator.validate_connected_graph(root) {
+            errors.extend(error.into_validation_errors()?);
+            fatal |= !self.config.allow_unconnected_components;
         }
 
         for result in [
@@ -54,36 +55,24 @@ where
             validator.validate_chps(),
             validator.validate_steam_boilers(),
         ] {
-            if let Err(e) = result {
-                errors.push(e);
-                validation_failed |= !self.config.allow_component_validation_failures;
+            if let Err(error) = result {
+                errors.extend(error.into_validation_errors()?);
+                fatal |= !self.config.allow_component_validation_failures;
             }
         }
-        match errors.len() {
-            0 => {}
-            1 => {
-                if validation_failed {
-                    return Err(errors[0].clone());
-                } else {
-                    tracing::warn!("{}", errors[0]);
-                }
-            }
-            _ => {
-                let err = Error::invalid_graph(format!(
-                    "Multiple validation failures:\n    {}",
-                    errors
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("\n    ")
-                ));
-                if validation_failed {
-                    return Err(err);
-                } else {
-                    tracing::warn!("{}", err);
-                }
-            }
+
+        if errors.is_empty() {
+            return Ok(());
         }
-        Ok(())
+
+        let error = Error::validation_errors(errors);
+        if fatal {
+            Err(error)
+        } else {
+            // Every collected failure is tolerated by the configuration, so
+            // report them as a warning instead of failing construction.
+            tracing::warn!("{error}");
+            Ok(())
+        }
     }
 }
