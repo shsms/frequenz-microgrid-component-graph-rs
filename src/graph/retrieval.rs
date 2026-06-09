@@ -188,7 +188,7 @@ where
     pub(crate) fn find_all(
         &self,
         from: u64,
-        mut pred: impl FnMut(&N) -> bool,
+        pred: impl Fn(&N) -> bool,
         direction: petgraph::Direction,
         follow_after_match: bool,
     ) -> Result<BTreeSet<u64>, Error> {
@@ -196,9 +196,16 @@ where
             Error::component_not_found(format!("Component with id {from} not found."))
         })?;
         let mut stack = vec![*index];
+        let mut visited = HashSet::new();
         let mut found = BTreeSet::new();
 
         while let Some(index) = stack.pop() {
+            // Skip nodes already expanded: a DAG with diamonds reaches the
+            // same node by multiple paths, and re-expanding it is redundant
+            // (and exponential on chained diamonds).
+            if !visited.insert(index) {
+                continue;
+            }
             let node = &self.graph[index];
             // Pass-through nodes are transparent: skip the predicate
             // check but follow through their neighbors.
@@ -596,6 +603,63 @@ mod tests {
 
         let found = graph.find_all(3, |_| true, petgraph::Direction::Outgoing, true)?;
         assert_eq!(found, [3, 4, 5].iter().cloned().collect());
+
+        Ok(())
+    }
+
+    /// `find_all` deduplicates on a re-converging (diamond) topology: a node
+    /// reachable by two paths is expanded once, not once per path. This is the
+    /// shape the `visited` set guards — the tree topologies above never exercise
+    /// it. `follow_after_match = true` is the case that actually re-expands (a
+    /// matched node keeps expanding), so the diamond apex and its subtree must
+    /// still appear exactly once.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2}`, both `→ Inverter:3 → Battery:4`.
+    #[test]
+    fn test_find_all_dedups_on_diamond() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter_a = builder.meter();
+        let meter_b = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, meter_a);
+        builder.connect(grid, meter_b);
+        // The inverter is the diamond apex: reachable via both meters.
+        builder.connect(meter_a, inverter);
+        builder.connect(meter_b, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+
+        // follow_after_match = true: the inverter matches yet keeps expanding, and
+        // it is reached by both meters — it and its battery must appear once each.
+        let found = graph.find_all(
+            grid.component_id(),
+            |n| !n.is_grid(),
+            petgraph::Direction::Outgoing,
+            true,
+        )?;
+        assert_eq!(
+            found,
+            BTreeSet::from([
+                meter_a.component_id(),
+                meter_b.component_id(),
+                inverter.component_id(),
+                battery.component_id(),
+            ])
+        );
+
+        // A predicate matching only the apex's subtree still reaches it through
+        // the diamond — the apex is expanded, not skipped before its successors.
+        let found = graph.find_all(
+            grid.component_id(),
+            |n| n.is_battery(),
+            petgraph::Direction::Outgoing,
+            true,
+        )?;
+        assert_eq!(found, BTreeSet::from([battery.component_id()]));
 
         Ok(())
     }
