@@ -243,35 +243,25 @@ impl Expr {
 
 impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.generate_string(false))
+        write!(f, "{}", self.render())
     }
 }
 
-/// Specifies how to add brackets when generating a string representation of an
-/// expression.
+/// Display helpers for `Expr`.
 ///
-/// - `First`: Add brackets around the first component.
-/// - `Rest`: Add brackets around all components except the first.
-/// - `All`: Add brackets around all components.
-/// - `None`: Do not add brackets.
-#[derive(PartialEq)]
-enum BracketComponents {
-    First,
-    Rest,
-    All,
-    None,
-}
-
-/// Display helpers for `FormulaExpression`.
+/// Bracketing is precedence-based: only an *additive* expression (`Add` / `Sub`)
+/// can be ambiguous in context, and only in two positions — as the operand of a
+/// negation (`-(a + b)`) or as a non-first operand of a subtraction
+/// (`a - (b + c)`). Everywhere else (additions, the first term of a
+/// subtraction, and the comma-separated arguments of `COALESCE` / `MIN` /
+/// `MAX`) an additive child renders without brackets, because `a + b - c`
+/// already parses as `a + (b - c)`.
 impl Expr {
-    /// Generates a string representation of the expression.
-    ///
-    /// If `bracket_whole` is `true` and the expression has more than one
-    /// component, the whole expression is enclosed in brackets.
-    fn generate_string(&self, bracket_whole: bool) -> String {
+    /// Renders the expression as a formula string.
+    fn render(&self) -> String {
         match self {
             Self::None => String::from("None"),
-            Self::Neg { param } => format!("-{}", param.generate_string(true)),
+            Self::Neg { param } => format!("-{}", param.render_grouped()),
             Self::Number { value } => {
                 if value.fract() == 0.0 {
                     // For whole numbers, format with one decimal place.
@@ -282,63 +272,44 @@ impl Expr {
                 }
             }
             Self::Component { component_id } => format!("#{component_id}"),
-            Self::Add { params } => {
-                Self::join_params(params, " + ", None, BracketComponents::None, bracket_whole)
-            }
-            Self::Sub { params } => {
-                Self::join_params(params, " - ", None, BracketComponents::Rest, bracket_whole)
-            }
-            Self::Coalesce { params } => Self::join_params(
-                params,
-                ", ",
-                Some("COALESCE"),
-                BracketComponents::None,
-                false,
-            ),
-            Self::Min { params } => {
-                Self::join_params(params, ", ", Some("MIN"), BracketComponents::None, false)
-            }
-            Self::Max { params } => {
-                Self::join_params(params, ", ", Some("MAX"), BracketComponents::None, false)
-            }
+            Self::Add { params } => Self::join(params, " + "),
+            Self::Sub { params } => match params.split_first() {
+                Some((first, rest)) => {
+                    let mut result = first.render();
+                    for param in rest {
+                        result.push_str(" - ");
+                        result.push_str(&param.render_grouped());
+                    }
+                    result
+                }
+                None => String::new(),
+            },
+            Self::Coalesce { params } => format!("COALESCE({})", Self::join(params, ", ")),
+            Self::Min { params } => format!("MIN({})", Self::join(params, ", ")),
+            Self::Max { params } => format!("MAX({})", Self::join(params, ", ")),
         }
     }
 
-    /// Joins a list of expressions into a string, with the specified separator.
-    ///
-    /// It also takes an optional prefix, and specifics on how to bracket the
-    /// components and the whole expression.
-    fn join_params(
-        params: &[Expr],
-        separator: &str,
-        prefix: Option<&str>,
-        bracket_components: BracketComponents,
-        bracket_whole: bool,
-    ) -> String {
-        let (mut result, suffix) = match prefix {
-            Some(prefix) => (format!("{prefix}("), String::from(")")),
-            None => (String::new(), String::new()),
-        };
-        let mut num_components = 0;
-        for expression in params.iter() {
-            if num_components > 0 {
-                result.push_str(separator);
+    /// Renders the expression, wrapping it in brackets when it is additive (so
+    /// it can be safely placed after a `-`).
+    fn render_grouped(&self) -> String {
+        match self {
+            // A single-term additive expression renders like its sole term, so
+            // it needs no brackets (matches the previous printer's behaviour).
+            Self::Add { params } | Self::Sub { params } if params.len() > 1 => {
+                format!("({})", self.render())
             }
-            if (bracket_components == BracketComponents::First && num_components == 0)
-                || (bracket_components == BracketComponents::Rest && num_components > 0)
-                || (bracket_components == BracketComponents::All)
-            {
-                result.push_str(&expression.generate_string(true));
-            } else {
-                result.push_str(&expression.generate_string(false));
-            }
-            num_components += 1;
+            _ => self.render(),
         }
-        if bracket_whole && num_components > 1 {
-            String::from("(") + &result + &suffix + ")"
-        } else {
-            result + &suffix
-        }
+    }
+
+    /// Renders and joins the given expressions with `separator`.
+    fn join(params: &[Expr], separator: &str) -> String {
+        params
+            .iter()
+            .map(Self::render)
+            .collect::<Vec<_>>()
+            .join(separator)
     }
 }
 
