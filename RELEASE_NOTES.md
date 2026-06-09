@@ -6,6 +6,8 @@
 
 ## Upgrading
 
+- The `AggregationFormula` and `CoalesceFormula` types and the `Formula` trait are replaced by a single `Formula` struct. The `*_formula` methods all return `Formula` now; combine formulas with `+`, `-`, and the `Formula::coalesce` / `min` / `max` methods.
+
 - Graph validation failures are now reported as `ErrorKind::ValidationErrors(Vec<ValidationError>)` rather than flattened into a single `InvalidGraph` error. Their `Display` changed accordingly: each failure is listed on its own line under a `Graph validation failed:` header, without the old per-line `InvalidGraph:` prefixes.
 
 ## New Features
