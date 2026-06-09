@@ -109,7 +109,9 @@ impl std::ops::Neg for Expr {
             Expr::Neg { param: inner } => *inner,
             // -(a - b) = b - a
             // -(a - b - c) = b + c - a
-            Expr::Sub { mut params } => {
+            // (`Sub` always has at least two operands by construction; the guard
+            // keeps `remove(0)` from panicking should that ever change.)
+            Expr::Sub { mut params } if !params.is_empty() => {
                 let first = params.remove(0);
                 Expr::Add { params } - first
             }
