@@ -9,6 +9,7 @@ use crate::ComponentGraph;
 use crate::Edge;
 use crate::Error;
 use crate::Node;
+use crate::component_category::CategoryPredicates;
 
 mod expr;
 mod fallback;
@@ -50,12 +51,24 @@ where
 
     /// Returns the CHP formula for the graph.
     pub fn chp_formula(&self, chp_ids: Option<BTreeSet<u64>>) -> Result<Formula, Error> {
-        generators::chp::CHPFormulaBuilder::try_new(self, chp_ids)?.build()
+        generators::category::category_formula(
+            self,
+            chp_ids,
+            |node| node.is_chp(),
+            "a CHP",
+            self.config.prefer_meters_in_chp_formula(),
+        )
     }
 
     /// Returns the PV formula for the graph.
     pub fn pv_formula(&self, pv_inverter_ids: Option<BTreeSet<u64>>) -> Result<Formula, Error> {
-        generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
+        generators::category::category_formula(
+            self,
+            pv_inverter_ids,
+            |node| node.is_pv_inverter(),
+            "a PV inverter",
+            self.config.prefer_meters_in_pv_formula(),
+        )
     }
 
     /// Returns the wind_turbine formula for the graph.
@@ -63,8 +76,13 @@ where
         &self,
         wind_turbine_ids: Option<BTreeSet<u64>>,
     ) -> Result<Formula, Error> {
-        generators::wind_turbine::WindTurbineFormulaBuilder::try_new(self, wind_turbine_ids)?
-            .build()
+        generators::category::category_formula(
+            self,
+            wind_turbine_ids,
+            |node| node.is_wind_turbine(),
+            "a wind turbine",
+            self.config.prefer_meters_in_wind_turbine_formula(),
+        )
     }
 
     /// Returns the EV charger formula for the graph.
@@ -72,7 +90,13 @@ where
         &self,
         ev_charger_ids: Option<BTreeSet<u64>>,
     ) -> Result<Formula, Error> {
-        generators::ev_charger::EVChargerFormulaBuilder::try_new(self, ev_charger_ids)?.build()
+        generators::category::category_formula(
+            self,
+            ev_charger_ids,
+            |node| node.is_ev_charger(),
+            "an EV charger",
+            self.config.prefer_meters_in_ev_charger_formula(),
+        )
     }
 
     /// Returns the formula for a specific component by its ID.
@@ -141,7 +165,42 @@ where
         &self,
         steam_boiler_ids: Option<BTreeSet<u64>>,
     ) -> Result<Formula, Error> {
-        generators::steam_boiler::SteamBoilerFormulaBuilder::try_new(self, steam_boiler_ids)?
-            .build()
+        generators::category::category_formula(
+            self,
+            steam_boiler_ids,
+            |node| node.is_steam_boiler(),
+            "a steam boiler",
+            self.config.prefer_meters_in_steam_boiler_formula(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
+
+    /// `component_formula` and `component_ac_coalesce_formula` return the bare
+    /// reading of the requested component — no meter fallback, even when the
+    /// component sits behind a meter the category formulas would drill into.
+    #[test]
+    fn test_component_formula() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let inv = inverter.component_id();
+
+        assert_eq!(graph.component_formula(inv)?.to_string(), format!("#{inv}"));
+        assert_eq!(
+            graph.component_ac_coalesce_formula(inv)?.to_string(),
+            format!("#{inv}")
+        );
+        Ok(())
     }
 }
