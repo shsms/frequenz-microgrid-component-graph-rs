@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     ComponentGraph, Edge, Error, Node,
-    graph::formulas::{AggregationFormula, expr::Expr, fallback::FallbackExpr},
+    graph::formulas::{Formula, expr::Expr, fallback::FallbackExpr},
 };
 
 pub(crate) struct GridFormulaBuilder<'a, N, E>
@@ -32,7 +32,7 @@ where
     /// The grid formula is the sum of all components connected to the grid.
     /// This formula can be used for calculating power or current metrics at the
     /// grid connection point.
-    pub fn build(self) -> Result<AggregationFormula, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
             let comp = FallbackExpr::new()
@@ -45,8 +45,8 @@ where
             };
         }
         Ok(expr
-            .map(AggregationFormula::new)
-            .unwrap_or_else(|| AggregationFormula::new(Expr::number(0.0))))
+            .map(Formula::new)
+            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
     }
 }
 

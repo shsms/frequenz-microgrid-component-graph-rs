@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
-use crate::graph::formulas::AggregationFormula;
+use crate::graph::formulas::Formula;
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::FallbackExpr;
 use crate::{ComponentGraph, Edge, Error, Node};
@@ -49,9 +49,9 @@ where
     ///
     /// This is the sum of all steam boilers in the graph. If the steam_boiler_ids are provided,
     /// only the steam boilers with the given ids are included in the formula.
-    pub fn build(self) -> Result<AggregationFormula, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         if self.steam_boiler_ids.is_empty() {
-            return Ok(AggregationFormula::new(Expr::number(0.0)));
+            return Ok(Formula::new(Expr::number(0.0)));
         }
 
         for id in &self.steam_boiler_ids {
@@ -65,7 +65,7 @@ where
         FallbackExpr::new()
             .prefer_meters(self.graph.config.prefer_meters_in_steam_boiler_formula())
             .generate(self.graph, self.steam_boiler_ids.clone())
-            .map(AggregationFormula::new)
+            .map(Formula::new)
     }
 }
 

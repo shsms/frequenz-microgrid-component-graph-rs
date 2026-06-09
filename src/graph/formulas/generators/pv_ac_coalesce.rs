@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     ComponentGraph, Edge, Error, Node,
-    graph::formulas::{CoalesceFormula, expr::Expr},
+    graph::formulas::{Formula, expr::Expr},
 };
 
 pub(crate) struct PVAcCoalesceFormulaBuilder<'a, N, E>
@@ -55,7 +55,7 @@ where
     ///
     /// When the `pv_inverter_ids` parameter is `None`, it will include all PV
     /// meters and inverters in the graph.
-    pub fn build(self) -> Result<CoalesceFormula, Error> {
+    pub fn build(self) -> Result<Formula, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
 
         for inv_id in &self.pv_inverter_ids {
@@ -78,7 +78,7 @@ where
                 expr.coalesce(Expr::component(*component_id))
             });
 
-        Ok(CoalesceFormula::new(coalesced))
+        Ok(Formula::new(coalesced))
     }
 }
 
