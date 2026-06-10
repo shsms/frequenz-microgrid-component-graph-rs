@@ -9,7 +9,11 @@ use super::super::expr::Expr;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     component_category::CategoryPredicates,
-    graph::formulas::{Formula, fallback::FallbackExpr, generators::grid::GridFormulaBuilder},
+    graph::formulas::{
+        Formula,
+        fallback::{SourcePreference, aggregate},
+        generators::grid::GridFormulaBuilder,
+    },
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -124,9 +128,11 @@ where
             // Subtract each successor from the expression.
             for successor in successors {
                 let successor_expr = if successor.1.is_meter() {
-                    FallbackExpr::new()
-                        .prefer_meters(true)
-                        .generate(self.graph, BTreeSet::from([successor.0]))?
+                    aggregate(
+                        self.graph,
+                        BTreeSet::from([successor.0]),
+                        SourcePreference::MetersFirst,
+                    )?
                 } else {
                     Expr::from(successor.1)
                 };
@@ -185,9 +191,11 @@ where
             if is_grid_meter(self.graph, self.graph.component(component_id)?)? {
                 continue;
             }
-            let component_with_fallback = FallbackExpr::new()
-                .prefer_meters(true)
-                .generate(self.graph, BTreeSet::from([component_id]))?;
+            let component_with_fallback = aggregate(
+                self.graph,
+                BTreeSet::from([component_id]),
+                SourcePreference::MetersFirst,
+            )?;
 
             expr = expr - component_with_fallback;
         }

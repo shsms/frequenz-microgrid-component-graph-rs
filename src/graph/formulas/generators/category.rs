@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use crate::graph::formulas::Formula;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::fallback::FallbackExpr;
+use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 /// Builds the aggregation formula for the components matching `is_category`.
@@ -54,10 +54,7 @@ where
         }
     }
 
-    FallbackExpr::new()
-        .prefer_meters(prefer_meters)
-        .generate(graph, ids)
-        .map(Formula::new)
+    aggregate(graph, ids, SourcePreference::prefer_meters(prefer_meters)).map(Formula::new)
 }
 
 /// Per-category wiring tests: each public `*_formula` method passes its own
