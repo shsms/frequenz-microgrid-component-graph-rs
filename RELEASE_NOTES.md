@@ -16,4 +16,4 @@
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
+- Fixed double-counting of a component fed by multiple parallel meters (a diamond topology): it is now measured as a single diamond term instead of once per parent meter.

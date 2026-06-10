@@ -9,6 +9,10 @@
 //! measured by a `COALESCE` of its own reading and the sum of its children,
 //! ordered by the [`SourcePreference`]. Per-child `COALESCE(_, 0)` fallbacks keep the
 //! result total (it always resolves to a value).
+//!
+//! When several parallel meters feed one component group (a diamond), their
+//! readings measure distinct feed lines and so sum to the group's throughput;
+//! the group's own readings are the fallback (see [`diamond`]).
 
 use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
@@ -69,10 +73,29 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
     } else {
         measurement_points(graph, &targets)?
             .into_iter()
-            .map(|id| measure(graph, id, policy))
+            .map(|point| match point {
+                Measurement::Single(id) => measure(graph, id, policy),
+                Measurement::Diamond { components, meters } => {
+                    diamond(&components, &meters, policy)
+                }
+            })
             .collect::<Result<_, _>>()?
     };
     sum(terms).ok_or(Error::internal("No components to generate formula."))
+}
+
+/// A target resolved to a measurement source by [`measurement_points`].
+#[derive(Debug, PartialEq)]
+enum Measurement {
+    /// A single node: a meter to drill into, or a component measured directly.
+    Single(u64),
+    /// A component group fed through several parallel meters. The meters sum to
+    /// the group's throughput, with the component readings as the fallback; see
+    /// [`diamond`].
+    Diamond {
+        components: Vec<u64>,
+        meters: Vec<u64>,
+    },
 }
 
 /// Resolves `targets` to the nodes actually measured: meters substituted in for
@@ -81,22 +104,36 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
 fn measurement_points<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: &BTreeSet<u64>,
-) -> Result<Vec<u64>, Error> {
+) -> Result<Vec<Measurement>, Error> {
     let mut remaining = targets.clone();
     let mut points = Vec::new();
     let mut seen = BTreeSet::new();
     while let Some(id) = remaining.pop_first() {
         if let Some(substitution) = meter_substitution(graph, id, targets)? {
-            for meter in substitution.meters {
-                if seen.insert(meter) {
-                    points.push(meter);
-                }
-            }
-            for sibling in substitution.siblings {
+            for &sibling in &substitution.siblings {
                 remaining.remove(&sibling);
             }
+            if substitution.meters.len() > 1 {
+                // Several parallel meters feed this group: combine them into one
+                // diamond term rather than measuring each meter independently,
+                // which would double-count the shared group.
+                let mut components: Vec<u64> =
+                    std::iter::once(id).chain(substitution.siblings).collect();
+                components.sort_unstable();
+                seen.extend(&substitution.meters);
+                points.push(Measurement::Diamond {
+                    components,
+                    meters: substitution.meters,
+                });
+            } else {
+                for meter in substitution.meters {
+                    if seen.insert(meter) {
+                        points.push(Measurement::Single(meter));
+                    }
+                }
+            }
         } else if seen.insert(id) {
-            points.push(id);
+            points.push(Measurement::Single(id));
         }
     }
     Ok(points)
@@ -733,12 +770,57 @@ mod tests {
         // The metered inverter (2) resolves to its meter (1)...
         assert_eq!(
             super::measurement_points(&graph, &BTreeSet::from([metered.component_id()]))?,
-            vec![meter.component_id()],
+            vec![super::Measurement::Single(meter.component_id())],
         );
         // ...while the meterless inverter (4) is measured directly.
         assert_eq!(
             super::measurement_points(&graph, &BTreeSet::from([meterless.component_id()]))?,
-            vec![meterless.component_id()],
+            vec![super::Measurement::Single(meterless.component_id())],
+        );
+        Ok(())
+    }
+
+    /// A component with several parallel meter parents (a diamond) is measured
+    /// once, through the combined meter readings, rather than double-counted by
+    /// summing each meter independently.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2} → Inverter:3 → Battery:4`.
+    #[test]
+    fn test_aggregate_diamond() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let m1 = builder.meter();
+        let m2 = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(grid, m1);
+        builder.connect(grid, m2);
+        builder.connect(m1, inverter);
+        builder.connect(m2, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let targets = BTreeSet::from([inverter.component_id()]);
+
+        // The two meters collapse into one diamond term over the inverter.
+        assert_eq!(
+            super::measurement_points(&graph, &targets)?,
+            vec![super::Measurement::Diamond {
+                components: vec![inverter.component_id()],
+                meters: vec![m1.component_id(), m2.component_id()],
+            }],
+        );
+
+        // Meters primary: their sum, then the inverter, then a best-effort sum.
+        assert_eq!(
+            aggregate(&graph, targets.clone(), SourcePreference::MetersFirst)?.to_string(),
+            "COALESCE(#1 + #2, #3, COALESCE(#1, 0.0) + COALESCE(#2, 0.0))",
+        );
+        // Components primary: the inverter, then the best-effort meter sum (the
+        // exact meter sum is dominated by it and dropped).
+        assert_eq!(
+            aggregate(&graph, targets, SourcePreference::ComponentsFirst)?.to_string(),
+            "COALESCE(#3, COALESCE(#1, 0.0) + COALESCE(#2, 0.0))",
         );
         Ok(())
     }
