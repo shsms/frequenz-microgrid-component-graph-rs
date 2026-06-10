@@ -17,7 +17,7 @@ mod generators;
 mod traversal;
 
 use expr::Expr;
-pub use formula::{AggregationFormula, CoalesceFormula, Formula};
+pub use formula::Formula;
 
 /// Formulas for various microgrid metrics.
 impl<N, E> ComponentGraph<N, E>
@@ -26,17 +26,17 @@ where
     E: Edge,
 {
     /// Returns the consumer formula for the graph.
-    pub fn consumer_formula(&self) -> Result<AggregationFormula, Error> {
+    pub fn consumer_formula(&self) -> Result<Formula, Error> {
         generators::consumer::ConsumerFormulaBuilder::try_new(self)?.build()
     }
 
     /// Returns the grid formula for the graph.
-    pub fn grid_formula(&self) -> Result<AggregationFormula, Error> {
+    pub fn grid_formula(&self) -> Result<Formula, Error> {
         generators::grid::GridFormulaBuilder::try_new(self)?.build()
     }
 
     /// Returns the producer formula for the graph.
-    pub fn producer_formula(&self) -> Result<AggregationFormula, Error> {
+    pub fn producer_formula(&self) -> Result<Formula, Error> {
         generators::producer::ProducerFormulaBuilder::try_new(self)?.build()
     }
 
@@ -44,23 +44,17 @@ where
     ///
     /// If `battery_ids` is `None`, the formula will contain all batteries in
     /// the graph.
-    pub fn battery_formula(
-        &self,
-        battery_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    pub fn battery_formula(&self, battery_ids: Option<BTreeSet<u64>>) -> Result<Formula, Error> {
         generators::battery::BatteryFormulaBuilder::try_new(self, battery_ids)?.build()
     }
 
     /// Returns the CHP formula for the graph.
-    pub fn chp_formula(&self, chp_ids: Option<BTreeSet<u64>>) -> Result<AggregationFormula, Error> {
+    pub fn chp_formula(&self, chp_ids: Option<BTreeSet<u64>>) -> Result<Formula, Error> {
         generators::chp::CHPFormulaBuilder::try_new(self, chp_ids)?.build()
     }
 
     /// Returns the PV formula for the graph.
-    pub fn pv_formula(
-        &self,
-        pv_inverter_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    pub fn pv_formula(&self, pv_inverter_ids: Option<BTreeSet<u64>>) -> Result<Formula, Error> {
         generators::pv::PVFormulaBuilder::try_new(self, pv_inverter_ids)?.build()
     }
 
@@ -68,7 +62,7 @@ where
     pub fn wind_turbine_formula(
         &self,
         wind_turbine_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    ) -> Result<Formula, Error> {
         generators::wind_turbine::WindTurbineFormulaBuilder::try_new(self, wind_turbine_ids)?
             .build()
     }
@@ -77,12 +71,12 @@ where
     pub fn ev_charger_formula(
         &self,
         ev_charger_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    ) -> Result<Formula, Error> {
         generators::ev_charger::EVChargerFormulaBuilder::try_new(self, ev_charger_ids)?.build()
     }
 
     /// Returns the formula for a specific component by its ID.
-    pub fn component_formula(&self, component_id: u64) -> Result<AggregationFormula, Error> {
+    pub fn component_formula(&self, component_id: u64) -> Result<Formula, Error> {
         Ok(Expr::component(component_id).into())
     }
 
@@ -94,7 +88,7 @@ where
     /// The formula is a `COALESCE` expression that includes all meters,
     /// PV inverters, and battery inverters that are directly connected to the
     /// grid.
-    pub fn grid_coalesce_formula(&self) -> Result<CoalesceFormula, Error> {
+    pub fn grid_coalesce_formula(&self) -> Result<Formula, Error> {
         generators::grid_coalesce::GridCoalesceFormulaBuilder::try_new(self)?.build()
     }
 
@@ -111,7 +105,7 @@ where
     pub fn battery_ac_coalesce_formula(
         &self,
         battery_ids: Option<BTreeSet<u64>>,
-    ) -> Result<CoalesceFormula, Error> {
+    ) -> Result<Formula, Error> {
         generators::battery_ac_coalesce::BatteryAcCoalesceFormulaBuilder::try_new(
             self,
             battery_ids,
@@ -132,16 +126,13 @@ where
     pub fn pv_ac_coalesce_formula(
         &self,
         pv_inverter_ids: Option<BTreeSet<u64>>,
-    ) -> Result<CoalesceFormula, Error> {
+    ) -> Result<Formula, Error> {
         generators::pv_ac_coalesce::PVAcCoalesceFormulaBuilder::try_new(self, pv_inverter_ids)?
             .build()
     }
 
     /// Returns the AC coalesce formula for a specific component by its ID.
-    pub fn component_ac_coalesce_formula(
-        &self,
-        component_id: u64,
-    ) -> Result<CoalesceFormula, Error> {
+    pub fn component_ac_coalesce_formula(&self, component_id: u64) -> Result<Formula, Error> {
         Ok(Expr::component(component_id).into())
     }
 
@@ -149,7 +140,7 @@ where
     pub fn steam_boiler_formula(
         &self,
         steam_boiler_ids: Option<BTreeSet<u64>>,
-    ) -> Result<AggregationFormula, Error> {
+    ) -> Result<Formula, Error> {
         generators::steam_boiler::SteamBoilerFormulaBuilder::try_new(self, steam_boiler_ids)?
             .build()
     }

@@ -9,9 +9,7 @@ use super::super::expr::Expr;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     component_category::CategoryPredicates,
-    graph::formulas::{
-        AggregationFormula, fallback::FallbackExpr, generators::grid::GridFormulaBuilder,
-    },
+    graph::formulas::{Formula, fallback::FallbackExpr, generators::grid::GridFormulaBuilder},
 };
 
 pub(crate) struct ConsumerFormulaBuilder<'a, N, E>
@@ -66,7 +64,7 @@ where
     }
 
     /// Generates the consumer formula for the given node.
-    pub fn build(mut self) -> Result<AggregationFormula, Error> {
+    pub fn build(mut self) -> Result<Formula, Error> {
         if !self.graph.config.include_phantom_loads_in_consumer_formula {
             return self.build_without_phantom_loads();
         }
@@ -94,9 +92,9 @@ where
         };
 
         match (all_meters, other_grid_successors) {
-            (Some(lhs), Some(rhs)) => Ok(AggregationFormula::new(lhs + rhs)),
-            (None, Some(expr)) | (Some(expr), None) => Ok(AggregationFormula::new(expr)),
-            (None, None) => Ok(AggregationFormula::new(Expr::number(0.0))),
+            (Some(lhs), Some(rhs)) => Ok(Formula::new(lhs + rhs)),
+            (None, Some(expr)) | (Some(expr), None) => Ok(Formula::new(expr)),
+            (None, None) => Ok(Formula::new(Expr::number(0.0))),
         }
     }
 
@@ -150,14 +148,14 @@ where
         }
     }
 
-    fn build_without_phantom_loads(&self) -> Result<AggregationFormula, Error> {
+    fn build_without_phantom_loads(&self) -> Result<Formula, Error> {
         let grid_successors = self
             .graph
             .successors(self.graph.root_id)?
             .collect::<Vec<_>>();
 
         if grid_successors.is_empty() {
-            return Ok(AggregationFormula::new(Expr::number(0.0)));
+            return Ok(Formula::new(Expr::number(0.0)));
         }
 
         if grid_successors
@@ -170,7 +168,7 @@ where
         }
     }
 
-    fn build_with_grid_meter(&self) -> Result<AggregationFormula, Error> {
+    fn build_with_grid_meter(&self) -> Result<Formula, Error> {
         let non_consumer_components = self.graph.find_all(
             self.graph.root_id,
             |node| {
@@ -194,10 +192,10 @@ where
             expr = expr - component_with_fallback;
         }
 
-        Ok(AggregationFormula::new(expr.max(Expr::number(0.0))))
+        Ok(Formula::new(expr.max(Expr::number(0.0))))
     }
 
-    fn build_without_grid_meter(&self) -> Result<AggregationFormula, Error> {
+    fn build_without_grid_meter(&self) -> Result<Formula, Error> {
         let consumer_components = self.graph.find_all(
             self.graph.root_id,
             |node| {
@@ -221,7 +219,7 @@ where
             };
         }
 
-        Ok(AggregationFormula::new(
+        Ok(Formula::new(
             expr.map(|expr| expr.max(Expr::number(0.0)))
                 .unwrap_or_else(|| Expr::number(0.0)),
         ))
