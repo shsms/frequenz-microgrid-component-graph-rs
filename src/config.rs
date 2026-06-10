@@ -38,10 +38,10 @@ pub struct ComponentGraphConfig {
     /// Default policy for the per-category "component" formulas.
     ///
     /// When `true` (the default), the meter measurement is the primary
-    /// source and the device measurement is the fallback for the per-
+    /// source and the component measurement is the fallback for the per-
     /// category formulas (`battery_formula`, `chp_formula`, `pv_formula`,
     /// `wind_turbine_formula`, `ev_charger_formula`, `steam_boiler_formula`).
-    /// When `false`, the device is primary and the meter is the fallback.
+    /// When `false`, the component is primary and the meter is the fallback.
     ///
     /// Per-formula overrides live in [`formula_overrides`][Self::formula_overrides].
     ///
@@ -49,7 +49,7 @@ pub struct ComponentGraphConfig {
     /// `producer_formula`, or any of the coalesce formulas.
     pub(crate) prefer_meters_in_component_formulas: bool,
 
-    /// Per-formula overrides for the meter/device preference; see
+    /// Per-formula overrides for the meter/component preference; see
     /// [`FormulaOverrides`].
     pub(crate) formula_overrides: FormulaOverrides,
 }
@@ -189,7 +189,7 @@ impl ComponentGraphConfigBuilder {
         self
     }
 
-    /// Sets the global meter-vs-device source preference for the
+    /// Sets the global meter-vs-component source preference for the
     /// per-category formulas. See the field-level docs on
     /// [`ComponentGraphConfig`] for the exact list of affected formulas.
     pub fn prefer_meters_in_component_formulas(mut self, value: bool) -> Self {
@@ -197,7 +197,7 @@ impl ComponentGraphConfigBuilder {
         self
     }
 
-    /// Sets the per-formula overrides for the meter/device preference.
+    /// Sets the per-formula overrides for the meter/component preference.
     /// Each override, when `Some(_)`, takes precedence over
     /// [`prefer_meters_in_component_formulas`][Self::prefer_meters_in_component_formulas]
     /// for that formula.
@@ -212,14 +212,14 @@ impl ComponentGraphConfigBuilder {
     }
 }
 
-/// Per-formula overrides for the meter/device preference in the
+/// Per-formula overrides for the meter/component preference in the
 /// per-category formulas.
 ///
 /// Each field is `None` by default, meaning the corresponding formula
 /// follows the global `prefer_meters_in_component_formulas` setting on
 /// [`ComponentGraphConfig`]. Setting an entry to `Some(true)` forces
 /// the meter as primary for that formula; `Some(false)` forces the
-/// device.
+/// component.
 ///
 /// Construct via [`FormulaOverrides::builder`] or
 /// [`FormulaOverrides::default`].
@@ -255,7 +255,7 @@ impl FormulaOverridesBuilder {
         }
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::pv_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::pv_formula
@@ -264,7 +264,7 @@ impl FormulaOverridesBuilder {
         self
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::battery_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::battery_formula
@@ -273,7 +273,7 @@ impl FormulaOverridesBuilder {
         self
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::chp_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::chp_formula
@@ -282,7 +282,7 @@ impl FormulaOverridesBuilder {
         self
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::ev_charger_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::ev_charger_formula
@@ -291,7 +291,7 @@ impl FormulaOverridesBuilder {
         self
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::wind_turbine_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::wind_turbine_formula
@@ -300,7 +300,7 @@ impl FormulaOverridesBuilder {
         self
     }
 
-    /// Override the meter/device preference for
+    /// Override the meter/component preference for
     /// [`ComponentGraph::steam_boiler_formula`][cg].
     ///
     /// [cg]: crate::ComponentGraph::steam_boiler_formula
