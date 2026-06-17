@@ -5,13 +5,9 @@
 
 pub(super) mod battery;
 pub(super) mod battery_ac_coalesce;
-pub(super) mod chp;
+pub(super) mod category;
 pub(super) mod consumer;
-pub(super) mod ev_charger;
 pub(super) mod grid;
 pub(super) mod grid_coalesce;
 pub(super) mod producer;
-pub(super) mod pv;
 pub(super) mod pv_ac_coalesce;
-pub(super) mod steam_boiler;
-pub(super) mod wind_turbine;

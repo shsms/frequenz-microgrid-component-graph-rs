@@ -7,7 +7,11 @@ use std::collections::BTreeSet;
 
 use crate::{
     ComponentGraph, Edge, Error, Node,
-    graph::formulas::{Formula, expr::Expr, fallback::FallbackExpr},
+    graph::formulas::{
+        Formula,
+        expr::Expr,
+        fallback::{SourcePreference, aggregate},
+    },
 };
 
 pub(crate) struct GridFormulaBuilder<'a, N, E>
@@ -35,10 +39,11 @@ where
     pub fn build(self) -> Result<Formula, Error> {
         let mut expr = None;
         for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = FallbackExpr::new()
-                .prefer_meters(true)
-                .meter_fallback_for_meters(true)
-                .generate(self.graph, BTreeSet::from([comp.component_id()]))?;
+            let comp = aggregate(
+                self.graph,
+                BTreeSet::from([comp.component_id()]),
+                SourcePreference::MetersFirstWithChains,
+            )?;
             expr = match expr {
                 None => Some(comp),
                 Some(e) => Some(comp + e),

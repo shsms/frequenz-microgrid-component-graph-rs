@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
 use crate::graph::formulas::expr::Expr;
-use crate::graph::formulas::fallback::FallbackExpr;
+use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct BatteryFormulaBuilder<'a, N, E>
@@ -55,10 +55,12 @@ where
             return Ok(Formula::new(Expr::number(0.0)));
         }
 
-        FallbackExpr::new()
-            .prefer_meters(self.graph.config.prefer_meters_in_battery_formula())
-            .generate(self.graph, self.inverter_ids.clone())
-            .map(Formula::new)
+        aggregate(
+            self.graph,
+            self.inverter_ids.clone(),
+            SourcePreference::prefer_meters(self.graph.config.prefer_meters_in_battery_formula()),
+        )
+        .map(Formula::new)
     }
 
     pub(super) fn find_inverter_ids(

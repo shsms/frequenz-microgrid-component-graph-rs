@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
-use crate::graph::formulas::fallback::FallbackExpr;
+use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct ProducerFormulaBuilder<'a, N, E>
@@ -48,9 +48,12 @@ where
             petgraph::Direction::Outgoing,
             false,
         )? {
-            let comp_expr = FallbackExpr::new()
-                .generate(self.graph, BTreeSet::from([component_id]))?
-                .min(Expr::number(0.0));
+            let comp_expr = aggregate(
+                self.graph,
+                BTreeSet::from([component_id]),
+                SourcePreference::ComponentsFirst,
+            )?
+            .min(Expr::number(0.0));
             expr = match expr {
                 None => Some(comp_expr),
                 Some(e) => Some(e + comp_expr),
