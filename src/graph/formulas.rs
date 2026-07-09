@@ -112,6 +112,9 @@ where
     /// The formula is a `COALESCE` expression that includes all meters,
     /// PV inverters, and battery inverters that are directly connected to the
     /// grid.
+    ///
+    /// A component that provides no telemetry is skipped. When no component
+    /// provides telemetry, the formula is `None`.
     pub fn grid_coalesce_formula(&self) -> Result<Formula, Error> {
         generators::grid_coalesce::GridCoalesceFormulaBuilder::try_new(self)?.build()
     }
@@ -126,6 +129,9 @@ where
     ///
     /// When the `battery_ids` parameter is `None`, it will include all the
     /// battery meters and inverters in the graph.
+    ///
+    /// A component that provides no telemetry is skipped. When no component
+    /// provides telemetry, the formula is `None`.
     pub fn battery_ac_coalesce_formula(
         &self,
         battery_ids: Option<BTreeSet<u64>>,
@@ -147,6 +153,9 @@ where
     ///
     /// When the `pv_inverter_ids` parameter is `None`, it will include all the
     /// PV meters and inverters in the graph.
+    ///
+    /// A component that provides no telemetry is skipped. When no component
+    /// provides telemetry, the formula is `None`.
     pub fn pv_ac_coalesce_formula(
         &self,
         pv_inverter_ids: Option<BTreeSet<u64>>,

@@ -5,7 +5,7 @@
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
-use crate::{ComponentGraph, Edge, Error, Node, graph::formulas::expr::Expr};
+use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct GridCoalesceFormulaBuilder<'a, N, E>
 where
@@ -32,8 +32,11 @@ where
     /// The formula is a `COALESCE` expression that includes all meters, PV
     /// inverters, and battery inverters that are directly connected to the
     /// grid.
+    ///
+    /// A component that provides no telemetry is skipped. When no component
+    /// provides telemetry, the formula is `None`.
     pub fn build(self) -> Result<Formula, Error> {
-        let expr = self
+        let ids = self
             .graph
             .successors(self.graph.root_id)?
             .filter(|node| {
@@ -41,11 +44,12 @@ where
                     || node.is_pv_inverter()
                     || node.is_battery_inverter(&self.graph.config)
             })
-            .fold(Expr::None, |coalesced, component| {
-                coalesced.coalesce(Expr::component(component.component_id()))
-            });
+            .map(|node| node.component_id())
+            .collect::<Vec<_>>();
 
-        Ok(Formula::new(expr))
+        Ok(Formula::new(super::coalesce_with_telemetry(
+            self.graph, ids,
+        )?))
     }
 }
 
@@ -91,6 +95,19 @@ mod tests {
         builder.connect(grid, pv_inverter);
 
         assert_eq!(pv_inverter.component_id(), 11);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_coalesce_formula()?.to_string();
+        assert_eq!(formula, "COALESCE(#11, #9, #6, #5, #1)");
+
+        // A PV inverter with no telemetry connected to the grid is skipped.
+        let pv_no_telemetry = builder.add_component_with_mode(
+            crate::ComponentCategory::Inverter(crate::InverterType::Pv),
+            crate::OperationalMode::ControlOnly,
+        );
+        builder.connect(grid, pv_no_telemetry);
+
+        assert_eq!(pv_no_telemetry.component_id(), 12);
 
         let graph = builder.build(None)?;
         let formula = graph.grid_coalesce_formula()?.to_string();

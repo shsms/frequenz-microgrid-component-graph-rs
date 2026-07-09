@@ -6,10 +6,7 @@
 use crate::component_category::CategoryPredicates;
 use std::collections::BTreeSet;
 
-use crate::{
-    ComponentGraph, Edge, Error, Node,
-    graph::formulas::{Formula, expr::Expr},
-};
+use crate::{ComponentGraph, Edge, Error, Node, graph::formulas::Formula};
 
 use super::battery::BatteryFormulaBuilder;
 
@@ -57,6 +54,9 @@ where
     ///
     /// When the `battery_ids` parameter is `None`, it will include all
     /// battery meters and inverters in the graph.
+    ///
+    /// A component that provides no telemetry is skipped. When no component
+    /// provides telemetry, the formula is `None`.
     pub fn build(self) -> Result<Formula, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
 
@@ -67,12 +67,10 @@ where
                 }
             }
         }
-        let coalesced = meters
-            .into_iter()
-            .chain(self.inverter_ids)
-            .fold(Expr::None, |expr, component_id: u64| {
-                expr.coalesce(Expr::component(component_id))
-            });
+        let coalesced = super::coalesce_with_telemetry(
+            self.graph,
+            meters.into_iter().chain(self.inverter_ids),
+        )?;
 
         Ok(Formula::new(coalesced))
     }
@@ -83,7 +81,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        ComponentGraphConfig, Error, InverterType, graph::test_utils::ComponentGraphBuilder,
+        ComponentCategory, ComponentGraphConfig, Error, InverterType, OperationalMode,
+        graph::test_utils::ComponentGraphBuilder,
     };
 
     #[test]
@@ -233,6 +232,39 @@ mod tests {
             "InvalidComponent: Battery 12 can't be in a formula without all its siblings: [13]."
         );
 
+        Ok(())
+    }
+
+    /// A battery inverter that provides no telemetry is dropped from the
+    /// coalesce, while the battery meter measuring it stays.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → BatMeter:2 → {Inv:3, Inv:4 (no
+    /// telemetry)} → Bat:5`.
+    #[test]
+    fn test_battery_ac_coalesce_skips_no_telemetry() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let bat_meter = builder.meter();
+        builder.connect(grid_meter, bat_meter);
+        let inv = builder.battery_inverter();
+        let inv_no_telemetry = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Battery),
+            OperationalMode::ControlOnly,
+        );
+        let battery = builder.battery();
+        builder.connect(bat_meter, inv);
+        builder.connect(bat_meter, inv_no_telemetry);
+        builder.connect(inv, battery);
+        builder.connect(inv_no_telemetry, battery);
+
+        let graph = builder.build(None)?;
+        // #4 is dropped; the battery meter #2 and the reporting inverter #3 remain.
+        assert_eq!(
+            graph.battery_ac_coalesce_formula(None)?.to_string(),
+            "COALESCE(#2, #3)",
+        );
         Ok(())
     }
 }
