@@ -222,6 +222,16 @@ pub(crate) trait CategoryPredicates: Node {
     fn is_steam_boiler(&self) -> bool {
         self.category() == ComponentCategory::SteamBoiler
     }
+
+    /// Returns `true` if the component provides telemetry data, and so can be a
+    /// measurement source in a formula.
+    ///
+    /// Determined by the component's [operational mode][Node::operational_mode].
+    /// A component that does not provide telemetry is still used to classify the
+    /// meter that measures it (e.g. as a PV meter or a CHP meter).
+    fn provides_telemetry(&self) -> bool {
+        self.operational_mode().provides_telemetry()
+    }
 }
 
 /// Implement the `CategoryPredicates` trait for all types that implement the

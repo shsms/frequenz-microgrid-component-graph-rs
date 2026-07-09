@@ -10,7 +10,9 @@ use crate::graph::formulas::expr::Expr;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 use super::SourcePreference;
-use super::predicates::{is_grid_meter, reached_only_through, reaches_any_below};
+use super::predicates::{
+    ids_with_telemetry, is_grid_meter, reached_only_through, reaches_any_below,
+};
 
 /// The measurement expression for a single node.
 pub(super) fn measure<N: Node, E: Edge>(
@@ -21,32 +23,74 @@ pub(super) fn measure<N: Node, E: Edge>(
     let own = Expr::component(id);
     let component = graph.component(id)?;
     if !component.is_meter() {
-        // A component measured directly: its own reading, or 0.
+        // A component measured directly: its own reading, or 0. A component
+        // that provides no telemetry has no reading to emit, so it
+        // contributes 0.
+        if !component.provides_telemetry() {
+            return Ok(Expr::number(0.0));
+        }
         return Ok(own.coalesce(Expr::number(0.0)));
     }
     let children: Vec<&N> = graph.successors(id)?.collect();
-    let child_ids: BTreeSet<u64> = children.iter().map(|c| c.component_id()).collect();
-    // A child backs the meter only when its reading belongs to this meter's
-    // line alone. A child that feeds a sibling adds no term: the flow it
-    // sends is already inside the fed sibling's reading, so a term for it
-    // would count that flow twice. A child that is also fed from outside
-    // this meter (a parallel meter's line) adds no term either: its reading
-    // holds more than this meter passes. If an excluded child also carries
-    // flow of its own, that share goes unseen — an accepted undercount in
-    // that unusual wiring, and only in the fallback.
+    // A child that provides no telemetry has no reading to emit: it is
+    // dropped from every child sum; the meter term itself covers it. A
+    // silent child meter is the exception: when its children are reached
+    // only through it and something below it reports, it contributes their
+    // readings through recursion ([`ChildTerm::Recurse`]). A silent meter
+    // whose children are fed around it stays out: its bare reading must
+    // never be emitted, and recursing would count the shared components
+    // once per feed. A reporting child backs the meter only when its
+    // reading belongs to this meter's line alone. A child that feeds a
+    // contributing sibling adds no term: the flow it sends is already
+    // inside the fed sibling's reading (or, for a recursed silent meter,
+    // its children's readings), so a term for it would count that flow
+    // twice. (A fed sibling that contributes nothing has no term to double
+    // count, so the feeder keeps its own term.) A child that is also fed
+    // from outside this meter (a parallel meter's line) adds no term
+    // either: its reading holds more than this meter passes. If an
+    // excluded child also carries flow of its own, that share goes unseen
+    // — an accepted undercount in that unusual wiring, and only in the
+    // fallback.
+    let mut contributing: Vec<&N> = Vec::new();
+    for child in children.iter().copied() {
+        if child.provides_telemetry()
+            || (child.is_meter()
+                && matches!(child_term_kind(graph, child)?, ChildTerm::Recurse)
+                && graph.reaches_any(
+                    child.component_id(),
+                    |node| node.provides_telemetry(),
+                    petgraph::Direction::Outgoing,
+                )?)
+        {
+            contributing.push(child);
+        }
+    }
+    let contributing_ids: BTreeSet<u64> = contributing.iter().map(|c| c.component_id()).collect();
     let meters = BTreeSet::from([id]);
     let mut kept: Vec<&N> = Vec::new();
-    for child in &children {
+    for child in &contributing {
         let child_id = child.component_id();
-        if !reaches_any_below(graph, child_id, &child_ids)?
+        if !reaches_any_below(graph, child_id, &contributing_ids)?
             && reached_only_through(graph, child_id, &meters)?
         {
             kept.push(child);
         }
     }
-    if kept.is_empty() {
-        // Nothing sound to fall back to: the meter is measured bare.
-        return Ok(own);
+    if !component.provides_telemetry() {
+        // A grid meter is never backed by its children: they do not carry
+        // its unmodeled consumer load. With no reading of its own, its
+        // term is null.
+        if is_grid_meter(graph, component)? {
+            return Ok(Expr::None);
+        }
+        // A meter with no reading of its own: its `#id` must never be
+        // emitted, so it is measured by the best-effort sum of its kept
+        // children (0.0 if none are left).
+        let terms = kept
+            .iter()
+            .map(|c| child_best_effort_term(graph, c, policy))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(sum(terms).unwrap_or_else(|| Expr::number(0.0)));
     }
     let standing = stands_alone(graph, id, policy)?;
     // A grid meter stays bare — it carries the site's unmodeled consumer
@@ -54,10 +98,22 @@ pub(super) fn measure<N: Node, E: Edge>(
     if standing && is_grid_meter(graph, component)? {
         return Ok(own);
     }
+    if kept.is_empty() {
+        // A childless meter stays bare, and so does one whose children were
+        // all excluded to avoid a double count. When there are children but
+        // none contribute, a 0.0 keeps the term total where their
+        // best-effort sum otherwise would.
+        return Ok(if !children.is_empty() && contributing.is_empty() {
+            own.coalesce(Expr::number(0.0))
+        } else {
+            own
+        });
+    }
     let empty = || Error::internal("Meter children sum is empty.");
     // `best` sums each kept child's reading-or-0 (child meters resolve
     // recursively, backed by their own children), so it resolves whenever
-    // anything beneath it reports.
+    // anything beneath it reports. A meter only drills when every child
+    // provides telemetry (see [`stands_alone`]).
     let terms = kept
         .iter()
         .map(|c| child_best_effort_term(graph, c, policy))
@@ -121,20 +177,36 @@ fn best_effort_sum(ids: &[u64]) -> Option<Expr> {
 /// - components primary: the component readings, then straight to that
 ///   best-effort sum — the exact meter sum it would otherwise carry in between
 ///   is dominated by the best-effort one, so it is omitted.
-pub(super) fn diamond_term(
+pub(super) fn diamond_term<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
     components: &[u64],
     meters: &[u64],
     policy: SourcePreference,
 ) -> Result<Expr, Error> {
     let empty = || Error::internal("Diamond measurement with no meters or components.");
-    let component_sum = exact_sum(components).ok_or_else(empty)?;
+    if components.is_empty() {
+        return Err(empty());
+    }
     let meter_best = best_effort_sum(meters).ok_or_else(empty)?;
-    Ok(if policy.meters_first() {
-        let meter_sum = exact_sum(meters).ok_or_else(empty)?;
-        meter_sum.coalesce(component_sum).coalesce(meter_best)
+    // A component that provides no telemetry has no reading; the meter
+    // readings still measure it, so it is dropped only from the
+    // component-side term. The component readings can stand in for the meter
+    // sum only when every component reports; otherwise their sum would
+    // undercount the group, so the meters are the sole source of the group
+    // total.
+    let all_report =
+        ids_with_telemetry(graph, components.iter().copied())?.len() == components.len();
+    if all_report {
+        let component_sum = exact_sum(components).ok_or_else(empty)?;
+        Ok(if policy.meters_first() {
+            let meter_sum = exact_sum(meters).ok_or_else(empty)?;
+            meter_sum.coalesce(component_sum).coalesce(meter_best)
+        } else {
+            component_sum.coalesce(meter_best)
+        })
     } else {
-        component_sum.coalesce(meter_best)
-    })
+        Ok(exact_sum(meters).ok_or_else(empty)?.coalesce(meter_best))
+    }
 }
 
 /// The measurement for a component group measured as its parent meter(s) minus
@@ -150,7 +222,8 @@ pub(super) fn diamond_term(
 /// - components primary: the exact component sum, then the difference, then
 ///   that reading-or-0 sum (or a plain 0 for a single component, which `exact`
 ///   already covers).
-pub(super) fn subtraction_term(
+pub(super) fn subtraction_term<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
     parent_meters: &[u64],
     subtracted: &[u64],
     components: &[u64],
@@ -158,24 +231,39 @@ pub(super) fn subtraction_term(
 ) -> Result<Expr, Error> {
     let empty = || Error::internal("Subtraction measurement with no components.");
     let no_meters = || Error::internal("Subtraction measurement with no parent meters.");
+    if components.is_empty() {
+        return Err(empty());
+    }
     // Several parallel parent meters (a diamond) sum to the group's throughput;
     // a single meter is just that sum of one.
     let meter_sum = exact_sum(parent_meters).ok_or_else(no_meters)?;
     let difference = subtracted
         .iter()
         .fold(meter_sum, |expr, &m| expr - Expr::component(m));
-    let exact = exact_sum(components).ok_or_else(empty)?;
-    let best = best_effort_sum(components).ok_or_else(empty)?;
-    Ok(if policy.meters_first() {
-        difference.coalesce(best)
+    // A component that provides no telemetry has no reading; the difference
+    // still measures it, so it is dropped only from the component-side terms.
+    // The exact component sum can be the primary source only when every
+    // component reports; otherwise it undercounts the group. The difference
+    // is then primary: it covers the whole group, including the missing
+    // readings.
+    let telemetry_components = ids_with_telemetry(graph, components.iter().copied())?;
+    let all_report = telemetry_components.len() == components.len();
+    let best = best_effort_sum(&telemetry_components);
+    if policy.meters_first() || !all_report {
+        // When no component reports, the difference has no component-reading
+        // backstop; fall back to 0.0 so the term stays total when the parent
+        // meters are missing too.
+        Ok(difference.coalesce(best.unwrap_or_else(|| Expr::number(0.0))))
     } else {
+        let exact = exact_sum(&telemetry_components).ok_or_else(empty)?;
+        let best = best.ok_or_else(empty)?;
         let last_resort = if components.len() > 1 {
             best
         } else {
             Expr::number(0.0)
         };
-        exact.coalesce(difference).coalesce(last_resort)
-    })
+        Ok(exact.coalesce(difference).coalesce(last_resort))
+    }
 }
 
 /// How one child contributes to its parent meter's children fallback sum.
@@ -243,6 +331,13 @@ pub(super) fn stands_alone<N: Node, E: Edge>(
 ) -> Result<bool, Error> {
     let successors: Vec<&N> = graph.successors(id)?.collect();
     if successors.is_empty() {
+        return Ok(true);
+    }
+    if successors.iter().any(|s| !s.provides_telemetry()) {
+        // A child that provides no telemetry has no reading to sum, so no
+        // child sum is exact for the group: the meter's own reading stays
+        // the primary source, backed by the children's best-effort sum (a
+        // silent child meter resolves through its descendants).
         return Ok(true);
     }
     if !successors.iter().any(|successor| successor.is_meter()) {

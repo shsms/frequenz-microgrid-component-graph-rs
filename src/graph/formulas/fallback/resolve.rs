@@ -217,11 +217,14 @@ fn classify_for_parents<N: Node, E: Edge>(
         if targets.contains(&sibling_id) {
             covered_has_meter |= sibling.is_meter();
             covered.push(sibling_id);
-        } else if sibling.is_meter() || is_measurable_component(sibling, &graph.config) {
+        } else if (sibling.is_meter() || is_measurable_component(sibling, &graph.config))
+            && sibling.provides_telemetry()
+        {
             subtracted.push(sibling_id);
         } else {
-            // A sibling with no usable reading: its share of the parents'
-            // readings is unknown.
+            // A sibling with no usable reading — an unmeasured category, or one
+            // that provides no telemetry: its share of the parents' readings is
+            // unknown, so the difference can't isolate the group.
             return Ok(None);
         }
     }

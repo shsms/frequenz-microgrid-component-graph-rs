@@ -59,6 +59,7 @@ where
 mod tests {
     use super::*;
     use crate::graph::test_utils::ComponentGraphBuilder;
+    use crate::{ComponentCategory, OperationalMode};
 
     #[test]
     fn test_grid_formula() -> Result<(), Error> {
@@ -210,6 +211,26 @@ mod tests {
             "PowerTransformer #2 must not appear in grid_formula, got {formula:?}",
         );
         assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        Ok(())
+    }
+
+    /// A grid meter that provides no telemetry is never backed by its
+    /// children (they do not carry the site's unmodeled load), so its term
+    /// is null rather than a wrong children sum.
+    ///
+    /// Topology (ids): `Grid:0 → GridMeter:1 (no telemetry) → Meter:2`.
+    #[test]
+    fn test_grid_formula_no_telemetry_grid_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "None");
         Ok(())
     }
 }

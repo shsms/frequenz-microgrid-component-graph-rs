@@ -9,11 +9,13 @@ use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
 
 /// The predecessor meters directly measuring `id`. `None` when `id` is not a
-/// measurable component, has no parent meter, or is fed by a grid meter; then
-/// neither the meter substitution nor the subtraction applies. A grid meter
-/// (see [`is_grid_meter`]) carries the site's unmodeled consumer load, so its
-/// reading covers more than its graph children: it can neither stand in for
-/// them nor be split across them.
+/// measurable component, has no parent meter, or is fed by a grid meter or a
+/// meter that provides no telemetry; then neither the meter substitution nor
+/// the subtraction applies, and the component is measured directly instead. A
+/// grid meter (see [`is_grid_meter`]) carries the site's unmodeled consumer
+/// load, so its reading covers more than its graph children: it can neither
+/// stand in for them nor be split across them. A no-telemetry meter has no
+/// reading to stand in or be split at all.
 ///
 /// An *internal* meter can also carry a phantom load (see
 /// [`ComponentGraphConfig`]). A substitution or subtraction would then count
@@ -38,7 +40,8 @@ pub(super) fn parent_meters<N: Node, E: Edge>(
         return Ok(None);
     }
     for &meter in &meters {
-        if is_grid_meter(graph, graph.component(meter)?)? {
+        let meter = graph.component(meter)?;
+        if is_grid_meter(graph, meter)? || !meter.provides_telemetry() {
             return Ok(None);
         }
     }
@@ -149,4 +152,22 @@ pub(super) fn is_measurable_component<N: Node>(node: &N, config: &ComponentGraph
         || node.is_ev_charger()
         || node.is_wind_turbine()
         || node.is_steam_boiler()
+}
+
+/// The subset of `ids` whose components provide telemetry, in the given order.
+///
+/// A component that provides no telemetry has no reading to emit, so it is
+/// dropped from any sum or difference of component readings; the meter that
+/// measures it still stands in for it.
+pub(crate) fn ids_with_telemetry<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    ids: impl IntoIterator<Item = u64>,
+) -> Result<Vec<u64>, Error> {
+    let mut kept = Vec::new();
+    for id in ids {
+        if graph.component(id)?.provides_telemetry() {
+            kept.push(id);
+        }
+    }
+    Ok(kept)
 }
