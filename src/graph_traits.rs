@@ -5,6 +5,7 @@
 //! that represent a node and an edge.
 
 use crate::component_category::ComponentCategory;
+use crate::operational_mode::OperationalMode;
 
 /**
 This trait needs to be implemented by the type that represents a node.
@@ -126,6 +127,33 @@ impl frequenz_microgrid_component_graph::Node
             pb::ElectricalComponentCategory::SteamBoiler => gr::ComponentCategory::SteamBoiler,
         }
     }
+
+    fn operational_mode(&self) -> frequenz_microgrid_component_graph::OperationalMode {
+        use common::v1alpha8::microgrid::electrical_components as pb;
+        use frequenz_microgrid_component_graph as gr;
+
+        let mode = pb::ElectricalComponentOperationalMode::try_from(self.operational_mode)
+            .unwrap_or_else(|e| {
+                error!("Error converting operational mode: {}", e);
+                pb::ElectricalComponentOperationalMode::Unspecified
+            });
+
+        match mode {
+            pb::ElectricalComponentOperationalMode::Unspecified => {
+                gr::OperationalMode::Unspecified
+            }
+            pb::ElectricalComponentOperationalMode::Inactive => gr::OperationalMode::Inactive,
+            pb::ElectricalComponentOperationalMode::TelemetryOnly => {
+                gr::OperationalMode::TelemetryOnly
+            }
+            pb::ElectricalComponentOperationalMode::ControlOnly => {
+                gr::OperationalMode::ControlOnly
+            }
+            pb::ElectricalComponentOperationalMode::ControlAndTelemetry => {
+                gr::OperationalMode::ControlAndTelemetry
+            }
+        }
+    }
 }
 ```
 
@@ -136,6 +164,20 @@ pub trait Node {
     fn component_id(&self) -> u64;
     /// Returns the category of the category.
     fn category(&self) -> ComponentCategory;
+    /// Returns the operational mode of the component.
+    ///
+    /// The default implementation returns [`OperationalMode::Unspecified`],
+    /// which is treated as providing telemetry. An implementor that does not
+    /// override this method keeps every component usable as a measurement
+    /// source in formulas.
+    ///
+    /// A component whose mode does not provide telemetry (see
+    /// [`OperationalMode::provides_telemetry`]) is not used as a measurement
+    /// source in formulas. It is still used to classify the meter that
+    /// measures it (e.g. as a PV meter or a CHP meter).
+    fn operational_mode(&self) -> OperationalMode {
+        OperationalMode::Unspecified
+    }
 }
 
 /**
