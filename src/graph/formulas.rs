@@ -100,7 +100,15 @@ where
     }
 
     /// Returns the formula for a specific component by its ID.
+    ///
+    /// A component that provides no telemetry has no reading to emit, so its
+    /// formula is `0.0`.
+    ///
+    /// Returns an error when `component_id` is not in the graph.
     pub fn component_formula(&self, component_id: u64) -> Result<Formula, Error> {
+        if !self.component(component_id)?.provides_telemetry() {
+            return Ok(Expr::number(0.0).into());
+        }
         Ok(Expr::component(component_id).into())
     }
 
@@ -165,7 +173,15 @@ where
     }
 
     /// Returns the AC coalesce formula for a specific component by its ID.
+    ///
+    /// A component that provides no telemetry has no reading to emit, so its
+    /// formula is `None`.
+    ///
+    /// Returns an error when `component_id` is not in the graph.
     pub fn component_ac_coalesce_formula(&self, component_id: u64) -> Result<Formula, Error> {
+        if !self.component(component_id)?.provides_telemetry() {
+            return Ok(Expr::None.into());
+        }
         Ok(Expr::component(component_id).into())
     }
 
@@ -186,7 +202,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
+    use crate::{
+        ComponentCategory, Error, InverterType, OperationalMode,
+        graph::test_utils::ComponentGraphBuilder,
+    };
 
     /// `component_formula` and `component_ac_coalesce_formula` return the bare
     /// reading of the requested component — no meter fallback, even when the
@@ -209,6 +228,56 @@ mod tests {
         assert_eq!(
             graph.component_ac_coalesce_formula(inv)?.to_string(),
             format!("#{inv}")
+        );
+        Ok(())
+    }
+
+    /// A component that provides no telemetry has no reading, so its formula is
+    /// `0.0` (`None` for the AC coalesce variant).
+    #[test]
+    fn test_component_formula_no_telemetry() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let inverter = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Battery),
+            OperationalMode::ControlOnly,
+        );
+        let battery = builder.battery();
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let inv = inverter.component_id();
+
+        assert_eq!(graph.component_formula(inv)?.to_string(), "0.0");
+        assert_eq!(
+            graph.component_ac_coalesce_formula(inv)?.to_string(),
+            "None"
+        );
+        Ok(())
+    }
+
+    /// Both component formula variants check the given id and return an error
+    /// when it is not in the graph.
+    #[test]
+    fn test_component_formula_unknown_id() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        builder.connect(grid, meter);
+        let graph = builder.build(None)?;
+
+        assert!(
+            graph
+                .component_formula(99)
+                .is_err_and(|e| e == Error::component_not_found("Component with id 99 not found."))
+        );
+        assert!(
+            graph
+                .component_ac_coalesce_formula(99)
+                .is_err_and(|e| e == Error::component_not_found("Component with id 99 not found."))
         );
         Ok(())
     }
