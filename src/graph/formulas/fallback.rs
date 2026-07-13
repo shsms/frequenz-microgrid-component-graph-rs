@@ -153,8 +153,8 @@ enum Measurement {
 /// Such a point can exist: a component sub-meter target can get its own
 /// `Single` first, and only a later sibling reveals that their shared parent
 /// meter covers the whole group. Leaving both in would subtract its readings
-/// twice. A dropped sub-meter stays in `seen`: its flow is inside the
-/// covering point now, so a later seed must not claim it again.
+/// twice. A dropped sub-meter stays claimed: its flow is inside the covering
+/// point now, so a later seed must not claim it again.
 fn drop_subsumed(points: &mut Vec<Measurement>, subsumed: &[u64]) {
     points
         .retain(|point| !matches!(point, Measurement::Single(single) if subsumed.contains(single)));
@@ -165,13 +165,19 @@ fn drop_subsumed(points: &mut Vec<Measurement>, subsumed: &[u64]) {
 /// subtraction for a group next to siblings, and a `Single` for every other
 /// target. Ordered by the target that first reaches each node, so the sum is
 /// stable.
+///
+/// `claimed` holds every node an emitted point already accounts for: covered
+/// meters and standalone nodes. It gates duplicate emission (a group whose
+/// single meter is claimed merges silently; a subtraction with a claimed
+/// parent falls back to a standalone point). A claim is never released:
+/// [`drop_subsumed`] keeps the retracted points' nodes claimed.
 fn measurement_points<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: &BTreeSet<u64>,
 ) -> Result<Vec<Measurement>, Error> {
     let mut remaining = targets.clone();
     let mut points = Vec::new();
-    let mut seen = BTreeSet::new();
+    let mut claimed = BTreeSet::new();
     // Groups already resolved, keyed by parent-meter set; see [`classify`]
     // for why one result fits every seed.
     let mut groups = BTreeMap::new();
@@ -185,12 +191,12 @@ fn measurement_points<N: Node, E: Edge>(
             // claimed first by the targets the current callers build.
             Some(group)
                 if group.subtracted.is_none()
-                    || group.meters.iter().all(|meter| !seen.contains(meter)) =>
+                    || group.meters.iter().all(|meter| !claimed.contains(meter)) =>
             {
                 group
             }
             _ => {
-                if seen.insert(id) {
+                if claimed.insert(id) {
                     points.push(Measurement::Single(id));
                 }
                 continue;
@@ -207,7 +213,7 @@ fn measurement_points<N: Node, E: Edge>(
         // drop it to avoid counting its readings twice.
         drop_subsumed(&mut points, &group.components);
         if let Some(subtracted) = group.subtracted {
-            seen.extend(&group.meters);
+            claimed.extend(&group.meters);
             points.push(Measurement::Subtraction {
                 parent_meters: group.meters,
                 subtracted,
@@ -217,7 +223,7 @@ fn measurement_points<N: Node, E: Edge>(
             // Several parallel meters feed this group: combine them into one
             // diamond term rather than measuring each meter independently,
             // which would double-count the shared group.
-            seen.extend(&group.meters);
+            claimed.extend(&group.meters);
             points.push(Measurement::Diamond {
                 components: group.components,
                 meters: group.meters,
@@ -226,7 +232,7 @@ fn measurement_points<N: Node, E: Edge>(
             // A single meter measuring exactly this group: the group merges
             // into the meter's own point (deduped against an earlier claim).
             for meter in group.meters {
-                if seen.insert(meter) {
+                if claimed.insert(meter) {
                     points.push(Measurement::Single(meter));
                 }
             }
