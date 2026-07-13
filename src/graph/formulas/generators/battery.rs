@@ -363,4 +363,30 @@ mod tests {
 
         Ok(())
     }
+
+    /// A component is measured through its predecessor meter, found by walking
+    /// past a pass-through node.
+    ///
+    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
+    #[test]
+    fn test_battery_formula_finds_meter_through_passthrough() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let pt = builder.power_transformer();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, pt);
+        builder.connect(pt, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.battery_formula(None)?.to_string();
+        // Inverter falls back to its effective predecessor meter,
+        // walking past the transformer.
+        assert_eq!(formula, "COALESCE(#3, #1, 0.0)");
+        Ok(())
+    }
 }

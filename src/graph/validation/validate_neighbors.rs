@@ -175,7 +175,9 @@ mod tests {
     use crate::InverterType;
     use crate::component_category::BatteryType;
     use crate::component_category::EvChargerType;
-    use crate::graph::test_utils::{TestComponent, TestConnection, validation_error};
+    use crate::graph::test_utils::{
+        ComponentGraphBuilder, TestComponent, TestConnection, validation_error,
+    };
 
     #[test]
     fn test_validate_root() {
@@ -555,5 +557,31 @@ mod tests {
         connections.pop();
 
         assert!(ComponentGraph::try_new(components, connections, config.clone()).is_ok());
+    }
+
+    /// Validation accepts a graph where a pass-through category sits
+    /// between an inverter and its meter / between a meter and the
+    /// grid. Neighbor rules (`M1`, `I1-I4`, `B1`) consult the
+    /// effective predecessors / successors, so the chain through the
+    /// pass-through reads as if it weren't there.
+    ///
+    /// Topology: `Grid → PowerTransformer → Meter → BatteryInverter → Battery`
+    #[test]
+    fn test_validation_accepts_passthrough_predecessor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        // Should build cleanly with the default config.
+        let _graph = builder.build(None)?;
+        Ok(())
     }
 }
