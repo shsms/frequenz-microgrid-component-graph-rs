@@ -2417,4 +2417,272 @@ mod tests {
         graph.pv_formula(None)?;
         Ok(())
     }
+
+    /// Pins that a subtraction stays a subtraction when the redundant-feeder
+    /// pruning empties its subtracted set. Every subtracted sibling must then
+    /// have all its successors inside the subtracted set, which needs a cycle
+    /// among the siblings — so this input exists only on graphs kept alive by
+    /// the validation allow-flags. The point still carries the subtraction
+    /// shape (parent-meter sum, nothing subtracted), not a meter
+    /// substitution.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1`, and an off-root `Meter:2 →
+    /// {Inverter:3 (PV), Meter:4, Meter:5}` with `Meter:4 ↔ Meter:5`.
+    #[test]
+    fn test_pruned_empty_subtraction_keeps_shape() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let meter = builder.meter();
+        let pv = builder.solar_inverter();
+        builder.connect(meter, pv);
+        let a = builder.meter();
+        let b = builder.meter();
+        builder.connect(meter, a);
+        builder.connect(meter, b);
+        builder.connect(a, b);
+        builder.connect(b, a);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unconnected_components(true)
+                .allow_component_validation_failures(true)
+                .build(),
+        ))?;
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([3]))?,
+            vec![super::Measurement::Subtraction {
+                parent_meters: vec![2],
+                subtracted: vec![],
+                components: vec![3],
+            }],
+        );
+        Ok(())
+    }
+
+    /// Pins the resolver's claim bookkeeping for meter targets.
+    ///
+    /// Only the consumer formula puts meters in the target set, and its
+    /// target collection stops at the first component chain, so a target is
+    /// never nested below another target meter. The scenarios here go beyond
+    /// that caller contract on purpose: they pin how the claim set behaves
+    /// today, so a restructuring that changes it is noticed. A deliberate
+    /// behavior change may update these expectations.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+    /// Inverter:4 (PV), Inverter:5 → Battery:6}`, and a load (Meter:7) under
+    /// the grid meter.
+    #[test]
+    fn test_claim_semantics_meter_targets() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let pv1 = builder.solar_inverter();
+        builder.connect(mixed_meter, pv1);
+        let pv2 = builder.solar_inverter();
+        builder.connect(mixed_meter, pv2);
+        let battery_inverter = builder.inv_bat_chain(1);
+        builder.connect(mixed_meter, battery_inverter);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+        let graph = builder.build(None)?;
+
+        // The meter target claims itself as a `Single`. The inverter's
+        // subtraction is then rejected — its parent meter is already claimed
+        // by a point that measures more than the inverter's group — and the
+        // seed falls back to a standalone point.
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([2, 3]))?,
+            vec![super::Measurement::Single(2), super::Measurement::Single(3)],
+        );
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([2, 3, 4]))?,
+            vec![
+                super::Measurement::Single(2),
+                super::Measurement::Single(3),
+                super::Measurement::Single(4)
+            ],
+        );
+
+        // With every child of the mixed meter targeted, the substitution
+        // resolves the group onto the already-claimed meter: the group merges
+        // into the existing point and emits nothing new.
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([2, 3, 4, 5]))?,
+            vec![super::Measurement::Single(2)],
+        );
+        Ok(())
+    }
+
+    /// Pins that a subsumed point stays claimed: a later seed must not claim
+    /// the same node again, because its flow is already inside the covering
+    /// point. The input has a target nested below a target meter, which no
+    /// current caller produces (see [`test_claim_semantics_meter_targets`] on
+    /// the caller contract); the nested target then resolves to no point of
+    /// its own.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Meter:3 → Inverter:5 →
+    /// Battery:6, Inverter:4 (PV)}`, and a load (Meter:7) under the grid
+    /// meter.
+    #[test]
+    fn test_subsumed_claim_stays_claimed() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let sub_meter = builder.meter();
+        builder.connect(mixed_meter, sub_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let battery_inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(sub_meter, battery_inverter);
+        builder.connect(battery_inverter, battery);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+        let graph = builder.build(None)?;
+
+        // Seed 3 emits Single(3); seed 4's substitution onto Meter:2 subsumes
+        // it and drops that point. Meter:3 stays claimed, so seed 5's
+        // substitution onto it emits nothing — its flow is already inside
+        // Single(2).
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([3, 4, 5]))?,
+            vec![super::Measurement::Single(2)],
+        );
+        Ok(())
+    }
+
+    /// A target sibling that is a meter disqualifies the subtraction: the
+    /// parent's reading can't be split between the meter target and the other
+    /// targets. Both end up as standalone points.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Meter:3, Inverter:4
+    /// (PV), Inverter:5 → Battery:6}`, and a load (Meter:7) under the grid
+    /// meter.
+    #[test]
+    fn test_subtraction_rejects_target_meter_sibling() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let sub_meter = builder.meter();
+        builder.connect(mixed_meter, sub_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let battery_inverter = builder.inv_bat_chain(1);
+        builder.connect(mixed_meter, battery_inverter);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+        let graph = builder.build(None)?;
+
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([3, 4]))?,
+            vec![super::Measurement::Single(3), super::Measurement::Single(4)],
+        );
+        Ok(())
+    }
+
+    /// Two diamonds can never share a parallel meter: a shared meter means
+    /// one group's components are also fed by a meter that feeds the other
+    /// group, so the coverage check rejects both groups and each target stays
+    /// a standalone point. This pins that the resolver's meter claims never
+    /// meet an overlapping second diamond.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → {Meter:2, Meter:3, Meter:4}`, with
+    /// `Meter:2 → Inverter:5`, `Meter:3 → {Inverter:5, Inverter:6}`,
+    /// `Meter:4 → Inverter:6` (both PV).
+    #[test]
+    fn test_no_group_across_overlapping_diamonds() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let m_a = builder.meter();
+        let m_b = builder.meter();
+        let m_c = builder.meter();
+        builder.connect(grid_meter, m_a);
+        builder.connect(grid_meter, m_b);
+        builder.connect(grid_meter, m_c);
+        let pv1 = builder.solar_inverter();
+        let pv2 = builder.solar_inverter();
+        builder.connect(m_a, pv1);
+        builder.connect(m_b, pv1);
+        builder.connect(m_b, pv2);
+        builder.connect(m_c, pv2);
+        let graph = builder.build(None)?;
+
+        assert_eq!(
+            super::measurement_points(&graph, &BTreeSet::from([5, 6]))?,
+            vec![super::Measurement::Single(5), super::Measurement::Single(6)],
+        );
+        assert_eq!(
+            graph.pv_formula(None)?.to_string(),
+            "COALESCE(#5, 0.0) + COALESCE(#6, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// The subtraction-diamond subsume resolves to the same point no matter
+    /// which component id is lower — the twin of
+    /// [`test_substitution_asymmetric_diamond_order_independent`] for the
+    /// subtraction path. When the shared component's id is lower, the group
+    /// forms directly on the first seed and there is no standalone point to
+    /// subsume; the result is identical.
+    ///
+    /// Topology: `Grid → GridMeter → {M_a, M_b}`, `M_a → {PV_x, BatInverter →
+    /// Battery, PV_shared}`, `M_b → PV_shared`, built once with PV_x's id
+    /// lower and once with PV_shared's.
+    #[test]
+    fn test_subtraction_diamond_subsume_order_independent() -> Result<(), Error> {
+        for shared_id_first in [false, true] {
+            let mut builder = ComponentGraphBuilder::new();
+            let grid = builder.grid();
+            let grid_meter = builder.meter();
+            builder.connect(grid, grid_meter);
+            let m_a = builder.meter();
+            let m_b = builder.meter();
+            builder.connect(grid_meter, m_a);
+            builder.connect(grid_meter, m_b);
+            let first = builder.solar_inverter();
+            let bat_inverter = builder.battery_inverter();
+            let battery = builder.battery();
+            let second = builder.solar_inverter();
+            let (pv_x, pv_shared) = if shared_id_first {
+                (second, first)
+            } else {
+                (first, second)
+            };
+            builder.connect(m_a, pv_x);
+            builder.connect(m_a, bat_inverter);
+            builder.connect(bat_inverter, battery);
+            builder.connect(m_a, pv_shared);
+            builder.connect(m_b, pv_shared);
+            let graph = builder.build(None)?;
+
+            let targets = BTreeSet::from([pv_x.component_id(), pv_shared.component_id()]);
+            assert_eq!(
+                super::measurement_points(&graph, &targets)?,
+                vec![super::Measurement::Subtraction {
+                    parent_meters: vec![m_a.component_id(), m_b.component_id()],
+                    subtracted: vec![bat_inverter.component_id()],
+                    components: {
+                        let mut components = vec![pv_x.component_id(), pv_shared.component_id()];
+                        components.sort_unstable();
+                        components
+                    },
+                }],
+                "shared_id_first: {shared_id_first}",
+            );
+        }
+        Ok(())
+    }
 }
