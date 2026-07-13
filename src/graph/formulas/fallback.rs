@@ -27,6 +27,17 @@
 //! In that case the targets are measured as the parent meter minus those
 //! siblings, with the component readings as the fallback (see
 //! [`subtraction_term`]).
+//!
+//! # Resolution pipeline
+//!
+//! 1. `resolve`: [`measurement_points`] turns the target ids into ordered
+//!    [`Measurement`] points — single nodes, diamonds, and subtractions —
+//!    using one `classify` pass per seed.
+//! 2. `emit`: one [`Expr`] per point, via [`measure`],
+//!    [`diamond_term`], or
+//!    [`subtraction_term`].
+//! 3. [`aggregate`] sums the terms; [`aggregate_terms`] hands them to the
+//!    caller unsummed.
 
 mod emit;
 mod predicates;

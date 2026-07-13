@@ -82,7 +82,11 @@ pub(super) fn measure<N: Node, E: Edge>(
         // - a single kept device child: a plain 0 (`best` would just repeat
         //   the child already in `exact`);
         // - a single kept child meter: nothing — a meter is total on its own,
-        //   so no trailing term is added.
+        //   so no trailing term is added. (Unreachable today: only
+        //   components-first builds this ladder, components-first never
+        //   allows meter chains, so a meter with a meter child stands alone
+        //   instead of drilling here. Kept so the ladder stays right if that
+        //   ever changes.)
         let last_resort = if kept.len() > 1 {
             best
         } else if kept[0].is_meter() {
@@ -174,37 +178,58 @@ pub(super) fn subtraction_term(
     })
 }
 
-/// A child's contribution to a meter's `best` sum. The caller has already
-/// dropped children whose reading does not belong to the meter's line alone
-/// (see the child filter in [`measure`]).
-///
-/// A device child falls back to 0: `COALESCE(#id, 0)`.
-///
-/// A child meter whose children are reached only through it is resolved
-/// recursively through [`measure`]. Its own children then back its reading; a
-/// bare `#id` would make the whole sum null while they still report. Any
-/// other child meter stays a bare `#id`. A meter always measures its own feed
-/// line, so bare readings are safe to sum. But recursing into a child that is
-/// also fed through a sibling (a diamond below this level) would count the
-/// shared component once per feed. A grid meter also stays bare (inside
-/// [`measure`]), and so does a meter without children — there is nothing
-/// below it to fall back to.
+/// How one child contributes to its parent meter's children fallback sum.
+/// The caller has already dropped children whose reading does not belong to
+/// the meter's line alone (see the child filter in [`measure`]).
+enum ChildTerm {
+    /// A device child: its reading or 0 (`COALESCE(#id, 0)`), so the sum
+    /// still resolves when the device is offline.
+    ReadingOr0,
+    /// A child meter whose children are also fed around it (a diamond below
+    /// this level): its bare reading `#id`. A meter always measures its own
+    /// feed line, so bare readings are safe to sum, but recursing into it
+    /// would count the shared component once per feed.
+    Bare,
+    /// A child meter whose children are reached only through it: resolved
+    /// recursively through [`measure`], so its own children back its
+    /// reading. A bare `#id` would make the whole sum null while they still
+    /// report. (A grid meter, and a meter without children, still come out
+    /// of [`measure`] as a bare reading.)
+    Recurse,
+}
+
+/// Decides a child's [`ChildTerm`] for its parent meter's children fallback
+/// sum.
+fn child_term_kind<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    child: &N,
+) -> Result<ChildTerm, Error> {
+    if !child.is_meter() {
+        return Ok(ChildTerm::ReadingOr0);
+    }
+    let meter_id = child.component_id();
+    let meters = BTreeSet::from([meter_id]);
+    for successor in graph.successors(meter_id)? {
+        if !reached_only_through(graph, successor.component_id(), &meters)? {
+            return Ok(ChildTerm::Bare);
+        }
+    }
+    Ok(ChildTerm::Recurse)
+}
+
+/// A child's contribution to a meter's `best` sum; one term per
+/// [`ChildTerm`] decision.
 fn child_best_effort_term<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     child: &N,
     policy: SourcePreference,
 ) -> Result<Expr, Error> {
-    let child_id = child.component_id();
-    if !child.is_meter() {
-        return Ok(Expr::coalesce(Expr::component(child_id), Expr::number(0.0)));
-    }
-    let meters = BTreeSet::from([child_id]);
-    for successor in graph.successors(child_id)? {
-        if !reached_only_through(graph, successor.component_id(), &meters)? {
-            return Ok(Expr::component(child_id));
-        }
-    }
-    measure(graph, child_id, policy)
+    let id = child.component_id();
+    Ok(match child_term_kind(graph, child)? {
+        ChildTerm::ReadingOr0 => Expr::coalesce(Expr::component(id), Expr::number(0.0)),
+        ChildTerm::Bare => Expr::component(id),
+        ChildTerm::Recurse => measure(graph, id, policy)?,
+    })
 }
 
 /// Whether a meter's own reading is the only primary source (rather than
