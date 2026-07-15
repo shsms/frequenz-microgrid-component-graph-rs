@@ -90,7 +90,7 @@ mod tests {
         );
         assert_eq!(
             graph.chp_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#3, 0.0)"
+            "COALESCE(#2 - #4, #3, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -143,7 +143,7 @@ mod tests {
             graph
                 .ev_charger_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#3, 0.0)"
+            "COALESCE(#2 - #4, #3, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -194,7 +194,7 @@ mod tests {
         );
         assert_eq!(
             graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#3, 0.0)"
+            "COALESCE(#2 - #4, #3, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -247,7 +247,7 @@ mod tests {
             graph
                 .steam_boiler_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#3, 0.0)"
+            "COALESCE(#2 - #4, #3, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -300,7 +300,7 @@ mod tests {
             graph
                 .wind_turbine_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#3, 0.0)"
+            "COALESCE(#2 - #4, #3, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.

@@ -14,10 +14,13 @@
 //! readings measure distinct feed lines and so sum to the group's throughput;
 //! the group's own readings are the fallback (see [`diamond`]).
 //!
-//! When a meter's children are a mix of targets and other measured nodes —
-//! sibling meters (e.g. a PV+battery meter over PV inverters and a battery
-//! sub-meter) — the targets are measured as the parent meter minus those
-//! siblings, with the component readings as the fallback (see [`subtraction`]).
+//! A meter's children can be a mix: some are targets, others are measured
+//! nodes that are not targets. Those others can be sibling meters (e.g. a
+//! PV+battery meter over PV inverters and a battery sub-meter) or non-target
+//! components (e.g. one unreachable inverter next to its working siblings).
+//! In that case the targets are measured as the parent meter minus those
+//! siblings, with the component readings as the fallback (see
+//! [`subtraction_term`]).
 
 use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
@@ -121,7 +124,7 @@ enum Measurement {
         meters: Vec<u64>,
     },
     /// A component group measured as its parent meter(s) minus their other
-    /// children (sibling meters); see [`subtraction`].
+    /// children (sibling meters or non-target components); see [`subtraction_term`].
     Subtraction {
         /// The parent meter(s) whose readings sum to cover the whole group.
         parent_meters: Vec<u64>,
@@ -376,12 +379,14 @@ struct Subtraction {
     components: Vec<u64>,
 }
 
-/// If `id` is a component under a single meter whose non-target children are
-/// all sibling meters — none of them leading to further targets, and each fed
-/// only through that parent — the targets are measured as the parent meter
-/// minus those sibling meters (e.g. a PV+battery meter minus the battery
-/// sub-meter), returned as the [`Subtraction`] covering the whole group.
-/// Otherwise `None` (the component is measured some other way).
+/// If `id` is a component under a single meter whose non-target children all
+/// have their own readings (meters or measurable components) — none of them
+/// leading to further targets, and each fed only through that parent — the
+/// targets are measured as the parent meter minus those siblings (e.g. a
+/// PV+battery meter minus the battery sub-meter, or one unreachable inverter
+/// measured as the meter minus its working siblings), returned as the
+/// [`Subtraction`] covering the whole group. Otherwise `None` (the component
+/// is measured some other way).
 fn meter_subtraction<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
@@ -417,7 +422,7 @@ fn meter_subtraction<N: Node, E: Edge>(
                 return Ok(None);
             }
             siblings.push(sibling_id);
-        } else if sibling.is_meter() {
+        } else if sibling.is_meter() || is_measurable_component(sibling, &graph.config) {
             minus.push(sibling_id);
         } else {
             // A sibling with no usable reading: its share of the parent's
@@ -998,7 +1003,10 @@ mod tests {
         )?;
         assert_eq!(
             expr.to_string(),
-            "COALESCE(#2, #3, 0.0) + COALESCE(#7, 0.0) + COALESCE(#8, 0.0)"
+            concat!(
+                "COALESCE(#2, #3, 0.0) + ",
+                "COALESCE(#5 - #6, COALESCE(#7, 0.0) + COALESCE(#8, 0.0))"
+            )
         );
 
         let graph = builder.build(Some(
@@ -1064,7 +1072,10 @@ mod tests {
             BTreeSet::from([7, 14]),
             SourcePreference::ComponentsFirst,
         )?;
-        assert_eq!(expr.to_string(), "COALESCE(#7, 0.0) + COALESCE(#14, 0.0)");
+        assert_eq!(
+            expr.to_string(),
+            "COALESCE(#7, #5 - #6 - #8, 0.0) + COALESCE(#14, #12 - #13, 0.0)"
+        );
 
         Ok(())
     }
@@ -1283,6 +1294,61 @@ mod tests {
                 "COALESCE(#6, 0.0) + COALESCE(#7, 0.0))"
             ),
         );
+        // A partial group (one inverter without its mates) is the meter minus
+        // everything else under it — the working siblings and the sub-meter.
+        assert_eq!(
+            graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
+            "COALESCE(#2 - #4 - #5 - #6 - #7 - #8, #3, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// The subtracted siblings may be components rather than meters: a single
+    /// target inverter (e.g. one that is unreachable over the network) is
+    /// measured as the meter minus its working siblings, and a category's
+    /// inverters next to another category's inverter are measured as the meter
+    /// minus that inverter.
+    #[test]
+    fn test_aggregate_subtraction_component_siblings() -> Result<(), Error> {
+        // One inverter out of three, measured as the meter minus the others.
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → Inverter:3..5 (PV)`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let pv_meter = builder.meter_pv_chain(3);
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, pv_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
+            "COALESCE(#2 - #4 - #5, #3, 0.0)",
+        );
+
+        // A PV inverter next to a battery inverter: each category is the
+        // meter minus the other category's inverter.
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+        // Inverter:4 → Battery:5}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let battery_inverter = builder.inv_bat_chain(1);
+        builder.connect(mixed_meter, battery_inverter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.pv_formula(None)?.to_string(),
+            "COALESCE(#2 - #4, #3, 0.0)",
+        );
+        assert_eq!(
+            graph.battery_formula(None)?.to_string(),
+            "COALESCE(#2 - #3, #4, 0.0)",
+        );
         Ok(())
     }
 
@@ -1345,7 +1411,7 @@ mod tests {
 
     /// Shapes where the parent meter's reading can't be split cleanly fall
     /// back to measuring the targets directly:
-    /// - an unmetered non-target sibling (its share is unknown);
+    /// - a non-target sibling with no usable reading (its share is unknown);
     /// - a sibling meter leading to other targets (they are measured on their
     ///   own, so subtracting them would drop them from the total);
     /// - a parent meter directly under the grid connection point (it carries

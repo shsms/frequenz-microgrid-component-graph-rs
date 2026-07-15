@@ -170,8 +170,8 @@ mod tests {
                 "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
                 "MIN(COALESCE(#7, 0.0), 0.0) + ",
                 "MIN(COALESCE(#8, 0.0), 0.0) + ",
-                "MIN(COALESCE(#13, 0.0), 0.0) + ",
-                "MIN(COALESCE(#14, 0.0), 0.0)"
+                "MIN(COALESCE(#13, #12 - #14, 0.0), 0.0) + ",
+                "MIN(COALESCE(#14, #12 - #13, 0.0), 0.0)"
             )
         );
 
