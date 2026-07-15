@@ -11,7 +11,7 @@ use crate::{
     component_category::CategoryPredicates,
     graph::formulas::{
         Formula,
-        fallback::{SourcePreference, aggregate, aggregate_terms},
+        fallback::{SourcePreference, aggregate, aggregate_terms, is_grid_meter},
         generators::grid::GridFormulaBuilder,
     },
 };
@@ -23,31 +23,6 @@ where
 {
     unvisited_meters: BTreeSet<u64>,
     graph: &'a ComponentGraph<N, E>,
-}
-
-/// Returns true if the node is a grid meter.
-///
-/// A given component is identified as a grid meter if:
-///  - its predecessor is the grid connection point,
-///  - it is a meter,
-///  - it is not a component meter (battery meter, pv meter, etc.).
-fn is_grid_meter<N: Node, E: Edge>(
-    graph: &ComponentGraph<N, E>,
-    component: &N,
-) -> Result<bool, Error> {
-    if let Some(predecessor) = graph.predecessors(component.component_id())?.next() {
-        let sibling_count = graph
-            .siblings_from_predecessors(component.component_id())?
-            .count();
-
-        let is_fallback_grid_meter = is_grid_meter(graph, predecessor)? && sibling_count == 0;
-
-        Ok((predecessor.is_grid() || is_fallback_grid_meter)
-            && component.is_meter()
-            && !graph.is_component_meter(component.component_id())?)
-    } else {
-        Ok(false)
-    }
 }
 
 impl<'a, N, E> ConsumerFormulaBuilder<'a, N, E>

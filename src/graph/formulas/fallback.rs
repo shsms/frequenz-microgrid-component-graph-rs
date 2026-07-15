@@ -400,14 +400,11 @@ fn meter_subtraction<N: Node, E: Edge>(
         return Ok(None);
     }
     for &meter in &meters {
-        if graph
-            .predecessors(meter)?
-            .any(|predecessor| predecessor.is_grid())
-        {
-            // A meter directly under the grid connection point carries the
-            // site's unmodeled consumer load (the consumer formula counts its
-            // residual), so its reading is not exhaustive over its graph
-            // children.
+        if is_grid_meter(graph, graph.component(meter)?)? {
+            // A grid meter — directly under the grid connection point, or a
+            // sole-child fallback grid meter beneath one — carries the site's
+            // unmodeled consumer load (the consumer formula counts its residual),
+            // so its reading is not exhaustive over its graph children.
             return Ok(None);
         }
     }
@@ -636,6 +633,48 @@ fn stands_alone<N: Node, E: Edge>(
         return Ok(true);
     }
     graph.is_component_meter(successors[0].component_id())
+}
+
+/// Returns true if the node is a grid meter.
+///
+/// A given component is identified as a grid meter if:
+///  - it is a meter,
+///  - it is not a component meter (battery meter, pv meter, etc.),
+///  - one of its predecessors is the grid connection point (or, recursively,
+///    it is the sole child of such a meter — a fallback grid meter).
+///
+/// Every predecessor is checked, so the answer does not depend on edge order
+/// when a meter has several feeds (possible only when validation failures
+/// are allowed).
+pub(crate) fn is_grid_meter<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    component: &N,
+) -> Result<bool, Error> {
+    is_grid_meter_inner(graph, component, &mut BTreeSet::new())
+}
+
+/// [`is_grid_meter`] with the set of components already being checked. A
+/// repeated component cannot prove a grid connection again: skipping it stops
+/// the recursion on a cyclic graph (possible only when validation failures
+/// are allowed) instead of overflowing the stack.
+fn is_grid_meter_inner<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    component: &N,
+    checking: &mut BTreeSet<u64>,
+) -> Result<bool, Error> {
+    let id = component.component_id();
+    if !checking.insert(id) || !component.is_meter() || graph.is_component_meter(id)? {
+        return Ok(false);
+    }
+    let has_no_siblings = graph.siblings_from_predecessors(id)?.next().is_none();
+    for predecessor in graph.predecessors(id)? {
+        if predecessor.is_grid()
+            || (has_no_siblings && is_grid_meter_inner(graph, predecessor, checking)?)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn is_measurable_component<N: Node>(node: &N, config: &ComponentGraphConfig) -> bool {
@@ -1236,8 +1275,10 @@ mod tests {
     /// targets with the meter minus the sibling meters as the meter-side
     /// source, ordered against the component readings by the policy.
     ///
-    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3..7 (PV),
-    /// Meter:8}` — a "PV + unspecified" meter next to an unspecified sub-meter.
+    /// Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3..7 (PV),
+    /// Meter:8}, Meter:9}` — a "PV + unspecified" meter next to an unspecified
+    /// sub-meter, both under a grid meter (Meter:1) that also feeds a separate
+    /// load (Meter:9), so Meter:2 is a genuine internal meter.
     #[test]
     fn test_aggregate_subtraction() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
@@ -1252,6 +1293,11 @@ mod tests {
         }
         let sub_meter = builder.meter();
         builder.connect(mixed_meter, sub_meter);
+        // A second branch off the grid meter (a building load) keeps Meter:1 a
+        // grid meter and Meter:2 an internal meter, not a sole-child fallback
+        // grid meter that would carry the site's unmodeled load.
+        let load_meter = builder.meter();
+        builder.connect(main_meter, load_meter);
 
         let graph = builder.build(None)?;
         let targets = BTreeSet::from([3, 4, 5, 6, 7]);
@@ -1328,8 +1374,9 @@ mod tests {
 
         // A PV inverter next to a battery inverter: each category is the
         // meter minus the other category's inverter.
-        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
-        // Inverter:4 → Battery:5}`.
+        // Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3 (PV),
+        // Inverter:4 → Battery:5}, Meter:6}` — the grid meter (Meter:1) also
+        // feeds a load (Meter:6) so Meter:2 is an internal meter.
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
         let main_meter = builder.meter();
@@ -1340,6 +1387,8 @@ mod tests {
         builder.connect(mixed_meter, pv);
         let battery_inverter = builder.inv_bat_chain(1);
         builder.connect(mixed_meter, battery_inverter);
+        let load_meter = builder.meter();
+        builder.connect(main_meter, load_meter);
 
         let graph = builder.build(None)?;
         assert_eq!(
@@ -1360,8 +1409,9 @@ mod tests {
     /// sub-meter's own category formula is unaffected.
     #[test]
     fn test_aggregate_subtraction_component_sub_meter() -> Result<(), Error> {
-        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3,4 (PV),
-        // Meter:5 → Inverter:6 → Battery:7}`.
+        // Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3,4 (PV),
+        // Meter:5 → Inverter:6 → Battery:7}, Meter:8}` — the grid meter
+        // (Meter:1) also feeds a load (Meter:8) so Meter:2 is an internal meter.
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
         let main_meter = builder.meter();
@@ -1374,6 +1424,8 @@ mod tests {
         builder.connect(mixed_meter, pv2);
         let battery_meter = builder.meter_bat_chain(1, 1);
         builder.connect(mixed_meter, battery_meter);
+        let load_meter = builder.meter();
+        builder.connect(main_meter, load_meter);
 
         let graph = builder.build(None)?;
         assert_eq!(
@@ -1388,8 +1440,9 @@ mod tests {
         // The reverse order: battery inverters under the mixed meter, the PV
         // system behind the sub-meter.
         //
-        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 →
-        // Battery:4, Meter:5 → Inverter:6 (PV)}`.
+        // Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3 →
+        // Battery:4, Meter:5 → Inverter:6 (PV)}, Meter:7}` — the grid meter
+        // (Meter:1) also feeds a load (Meter:7) so Meter:2 is an internal meter.
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
         let main_meter = builder.meter();
@@ -1400,6 +1453,8 @@ mod tests {
         builder.connect(mixed_meter, battery_inverter);
         let pv_meter = builder.meter_pv_chain(1);
         builder.connect(mixed_meter, pv_meter);
+        let load_meter = builder.meter();
+        builder.connect(main_meter, load_meter);
 
         let graph = builder.build(None)?;
         assert_eq!(
@@ -1476,6 +1531,25 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, 0.0)");
 
+        // Parent meter is a fallback grid meter: the sole child of the grid
+        // meter, so it stands in for the grid connection point and likewise
+        // carries the site's unmodeled consumer load.
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+        // Meter:4}`, where Meter:2 is Meter:1's only child.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        let fallback_grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, fallback_grid_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(fallback_grid_meter, pv);
+        let sub_meter = builder.meter();
+        builder.connect(fallback_grid_meter, sub_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#3, 0.0)");
+
         // Sibling meter also fed from outside the parent.
         // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
         // Meter:4}`, plus `Meter:1 → Meter:4`.
@@ -1493,6 +1567,85 @@ mod tests {
 
         let graph = builder.build(None)?;
         assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#3, 0.0)");
+        Ok(())
+    }
+
+    /// A meter fed by both the grid connection point and another meter (a
+    /// shape that only builds when validation failures are allowed) is a grid
+    /// meter no matter in which order the edges were added. Every predecessor
+    /// is checked, so the formula does not flip with edge order.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1`, `Meter:2 → {Inverter:3 (PV),
+    /// Meter:4}`, with `Meter:2` fed by both `Grid:0` and `Meter:1`.
+    #[test]
+    fn test_grid_meter_second_feed_order_independent() -> Result<(), Error> {
+        for grid_edge_first in [true, false] {
+            let mut builder = ComponentGraphBuilder::new();
+            let grid = builder.grid();
+            let other_meter = builder.meter();
+            builder.connect(grid, other_meter);
+            let meter = builder.meter();
+            if grid_edge_first {
+                builder.connect(grid, meter);
+                builder.connect(other_meter, meter);
+            } else {
+                builder.connect(other_meter, meter);
+                builder.connect(grid, meter);
+            }
+            let pv = builder.solar_inverter();
+            builder.connect(meter, pv);
+            let sub_meter = builder.meter();
+            builder.connect(meter, sub_meter);
+
+            let graph = builder.build(Some(
+                ComponentGraphConfig::builder()
+                    .allow_component_validation_failures(true)
+                    .build(),
+            ))?;
+            // The grid-fed meter is never a subtraction source.
+            assert_eq!(
+                graph.pv_formula(None)?.to_string(),
+                "COALESCE(#3, 0.0)",
+                "grid_edge_first: {grid_edge_first}",
+            );
+        }
+        Ok(())
+    }
+
+    /// A cycle that is not reachable from the root survives validation when
+    /// unconnected components are allowed (the acyclicity walk starts at the
+    /// root). Formula generation must still stop on such a graph instead of
+    /// recursing forever through the cycle's predecessors.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → Inverter:3 (PV)`, plus
+    /// an off-root cycle `Meter:4 ↔ Meter:5` with `Meter:4 → Meter:2` and
+    /// `Meter:4 → Inverter:3`.
+    #[test]
+    fn test_off_root_cycle_terminates() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let meter = builder.meter();
+        builder.connect(grid_meter, meter);
+        let pv = builder.solar_inverter();
+        builder.connect(meter, pv);
+        let x = builder.meter();
+        let y = builder.meter();
+        builder.connect(x, y);
+        builder.connect(y, x);
+        builder.connect(x, meter);
+        builder.connect(x, pv);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_unconnected_components(true)
+                .allow_component_validation_failures(true)
+                .build(),
+        ))?;
+        // The exact formula does not matter on an invalid graph; generating
+        // it just must terminate.
+        graph.pv_formula(None)?;
         Ok(())
     }
 }

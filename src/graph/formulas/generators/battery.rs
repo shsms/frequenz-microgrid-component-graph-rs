@@ -300,20 +300,20 @@ mod tests {
         let formula = graph
             .battery_formula(Some(BTreeSet::from([19])))?
             .to_string();
-        assert_eq!(formula, "COALESCE(#18, 0.0)");
+        assert_eq!(formula, "COALESCE(#18, #17 - #20, 0.0)");
         let formula = graph_prefer_meters
             .battery_formula(Some(BTreeSet::from([19])))?
             .to_string();
-        assert_eq!(formula, "COALESCE(#18, 0.0)");
+        assert_eq!(formula, "COALESCE(#17 - #20, #18, 0.0)");
 
         let formula = graph
             .battery_formula(Some(BTreeSet::from([21])))?
             .to_string();
-        assert_eq!(formula, "COALESCE(#20, 0.0)");
+        assert_eq!(formula, "COALESCE(#20, #17 - #18, 0.0)");
         let formula = graph_prefer_meters
             .battery_formula(Some(BTreeSet::from([21])))?
             .to_string();
-        assert_eq!(formula, "COALESCE(#20, 0.0)");
+        assert_eq!(formula, "COALESCE(#17 - #18, #20, 0.0)");
 
         let formula = graph
             .battery_formula(Some(BTreeSet::from([4, 12, 13, 19])))?
@@ -323,7 +323,7 @@ mod tests {
             concat!(
                 "COALESCE(#3, #2, 0.0) + ",
                 "COALESCE(#11 + #10, #9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0)) + ",
-                "COALESCE(#18, 0.0)"
+                "COALESCE(#18, #17 - #20, 0.0)"
             )
         );
         let formula = graph_prefer_meters
@@ -334,7 +334,7 @@ mod tests {
             concat!(
                 "COALESCE(#2, #3, 0.0) + ",
                 "COALESCE(#9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0)) + ",
-                "COALESCE(#18, 0.0)"
+                "COALESCE(#17 - #20, #18, 0.0)"
             )
         );
 
