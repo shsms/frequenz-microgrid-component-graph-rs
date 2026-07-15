@@ -73,8 +73,23 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
     targets: BTreeSet<u64>,
     policy: SourcePreference,
 ) -> Result<Expr, Error> {
-    let terms: Vec<Expr> = if graph.config.disable_fallback_components {
-        targets.into_iter().map(Expr::component).collect()
+    sum(aggregate_terms(graph, targets, policy)?)
+        .ok_or(Error::internal("No components to generate formula."))
+}
+
+/// The per-group measurement terms for `targets`: one [`Expr`] per measurement
+/// point. A point is a meter substituted in for the group it exclusively
+/// measures, a diamond, a subtraction, or a single component. [`aggregate`]
+/// sums these terms. Callers that subtract the groups (e.g. the consumer
+/// formula) keep them separate. This way, siblings that share a meter are
+/// measured as one group; no sibling pulls in the others as a difference.
+pub(crate) fn aggregate_terms<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    targets: BTreeSet<u64>,
+    policy: SourcePreference,
+) -> Result<Vec<Expr>, Error> {
+    if graph.config.disable_fallback_components {
+        Ok(targets.into_iter().map(Expr::component).collect())
     } else {
         measurement_points(graph, &targets)?
             .into_iter()
@@ -89,9 +104,8 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
                     components,
                 } => subtraction_term(&parent_meters, &subtracted, &components, policy),
             })
-            .collect::<Result<_, _>>()?
-    };
-    sum(terms).ok_or(Error::internal("No components to generate formula."))
+            .collect()
+    }
 }
 
 /// A target resolved to a measurement source by [`measurement_points`].
@@ -122,6 +136,19 @@ enum Measurement {
     },
 }
 
+/// Called when a meter point that covers the `subsumed` nodes is emitted.
+/// Drops any standalone `Single` points already emitted for those nodes.
+/// Such a point can exist: a component sub-meter target can get its own
+/// `Single` first, and only a later sibling reveals that their shared parent
+/// meter covers the whole group. Leaving both in would subtract its readings
+/// twice. A dropped sub-meter stays in `seen`: its flow is inside the
+/// covering point now, so a later seed must not claim it again.
+fn drop_subsumed(points: &mut Vec<Measurement>, subsumed: &[u64]) {
+    points.retain(|point| {
+        !matches!(point, Measurement::Single(single) if subsumed.contains(single))
+    });
+}
+
 /// Resolves `targets` to the measurement points that cover them: a meter
 /// substituted in for the group it exclusively measures, a diamond or a
 /// subtraction for a group next to siblings, and a `Single` for every other
@@ -139,6 +166,13 @@ fn measurement_points<N: Node, E: Edge>(
             for &sibling in &substitution.siblings {
                 remaining.remove(&sibling);
             }
+            // A sibling can itself be a component sub-meter (e.g. a battery
+            // meter under a mixed meter). If its id was resolved first, it may
+            // already have its own point: a meter can't be a substitution
+            // seed, so it fell through to a standalone `Single`. The new meter
+            // point covers it too, so drop that `Single` to avoid subtracting
+            // its readings twice.
+            drop_subsumed(&mut points, &substitution.siblings);
             if substitution.meters.len() > 1 {
                 // Several parallel meters feed this group: combine them into one
                 // diamond term rather than measuring each meter independently,

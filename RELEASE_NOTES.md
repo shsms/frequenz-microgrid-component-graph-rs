@@ -16,6 +16,8 @@
 
 - Components that share a meter with sibling meters (e.g. PV inverters next to a battery sub-meter under one "PV + battery" meter) are now measured as the parent meter minus the sibling meters, with the component readings as the fallback: `COALESCE(#parent - #sub, ...)`.
 
+- The consumer formula now measures the non-consumer components behind one internal meter as one group: it subtracts `COALESCE(#meter, device readings...)` instead of each device on its own. The meter reading is used when it is available, and a shared meter is never subtracted twice. Note: if such a meter also carries a load that is not in the component graph, that load is now subtracted together with the group.
+
 ## Bug Fixes
 
 - Fixed double-counting of a component fed by multiple parallel meters (a diamond topology): it is now measured as a single diamond term instead of once per parent meter.

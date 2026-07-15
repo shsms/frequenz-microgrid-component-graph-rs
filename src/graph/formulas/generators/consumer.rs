@@ -11,7 +11,7 @@ use crate::{
     component_category::CategoryPredicates,
     graph::formulas::{
         Formula,
-        fallback::{SourcePreference, aggregate},
+        fallback::{SourcePreference, aggregate, aggregate_terms},
         generators::grid::GridFormulaBuilder,
     },
 };
@@ -187,17 +187,20 @@ where
         )?;
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
 
+        // Measure the non-consumer components as one group. Siblings that
+        // share a meter (e.g. inverters under a mixed "PV + CHP" meter) then
+        // resolve to that meter once. Otherwise each sibling would subtract
+        // the others as a meter-minus-siblings difference, and the meter
+        // would be counted twice.
+        let mut targets = BTreeSet::new();
         for component_id in non_consumer_components {
             if is_grid_meter(self.graph, self.graph.component(component_id)?)? {
                 continue;
             }
-            let component_with_fallback = aggregate(
-                self.graph,
-                BTreeSet::from([component_id]),
-                SourcePreference::MetersFirst,
-            )?;
-
-            expr = expr - component_with_fallback;
+            targets.insert(component_id);
+        }
+        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+            expr = expr - term;
         }
 
         Ok(Formula::new(expr.max(Expr::number(0.0))))
@@ -380,7 +383,7 @@ mod tests {
                 "#1 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
-                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0), ",
+                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)), ",
                 "0.0)"
             )
         );
@@ -463,7 +466,7 @@ mod tests {
                 "#1 + #15 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
-                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0) - ",
+                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)) - ",
                 "COALESCE(#12, #13, 0.0), ",
                 "0.0)",
             )
@@ -677,6 +680,46 @@ mod tests {
                 "COALESCE(MAX(#9 - #10, 0.0), 0.0)"
             )
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_consumer_formula_mixed_meter_with_component_submeter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+
+        // A "mixed" meter feeds a PV inverter and a battery sub-meter (itself
+        // a component chain). The battery sub-meter's id sorts before the PV
+        // inverter's id. So the sub-meter is first resolved onto its own
+        // measurement point. Only after that does the sibling PV inverter
+        // reveal that the mixed meter covers the whole group.
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let bat_submeter = builder.meter_bat_chain(1, 1);
+        builder.connect(mixed_meter, bat_submeter);
+        let solar_inverter = builder.solar_inverter();
+        builder.connect(mixed_meter, solar_inverter);
+
+        // A second grid-meter child so the mixed meter is not its sole child
+        // (which would make the mixed meter a fallback grid meter).
+        let pv_meter = builder.meter_pv_chain(1);
+        builder.connect(grid_meter, pv_meter);
+
+        assert_eq!(grid.component_id(), 0);
+        assert_eq!(grid_meter.component_id(), 1);
+        assert_eq!(mixed_meter.component_id(), 2);
+        assert_eq!(bat_submeter.component_id(), 3);
+        assert_eq!(solar_inverter.component_id(), 6);
+        assert_eq!(pv_meter.component_id(), 7);
+
+        let graph = builder.build(None)?;
+        let formula = graph.consumer_formula()?.to_string();
+        // The mixed meter (#2) covers its whole group, so it is subtracted once
+        // and the battery sub-meter (#3) is NOT subtracted again on its own.
+        assert_eq!(formula, "MAX(#1 - #2 - COALESCE(#7, #8, 0.0), 0.0)");
 
         Ok(())
     }
