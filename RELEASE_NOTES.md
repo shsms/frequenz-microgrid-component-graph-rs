@@ -16,7 +16,7 @@
 
 - `ErrorKind` and `ValidationError` are now public. `Error::kind()` exposes the kind, and each `ValidationError` reports its `message()` and the `component_ids()` it involves, so individual validation failures (including detected cycles) can be inspected programmatically instead of parsed from a string.
 
-- Components that share a meter with sibling meters or components of another category (e.g. PV inverters next to a battery sub-meter under one "PV + battery" meter) now fall back to the parent meter minus those siblings (`COALESCE(..., #parent - #sub, ...)`) when their own readings are missing. This also applies to partial groups, so a single unreachable inverter can be measured as the meter minus its working siblings.
+- Components that share a meter with sibling meters or components of another category (e.g. PV inverters next to a battery sub-meter under one "PV + battery" meter) now fall back to the parent meter minus those siblings (`COALESCE(..., #parent - #sub, ...)`) when their own readings are missing. This also applies to partial groups, so a single unreachable inverter can be measured as the meter minus its working siblings, and to diamonds, where a target behind several parallel meters is measured as their summed readings minus its non-target siblings.
 
 - The consumer formula now measures the non-consumer components behind one internal meter as one group: it subtracts `COALESCE(#meter, device readings...)` instead of each device on its own. The meter reading is used when it is available, and a shared meter is never subtracted twice. Note: if such a meter also carries a load that is not in the component graph, that load is now subtracted together with the group.
 

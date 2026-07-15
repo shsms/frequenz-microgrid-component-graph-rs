@@ -451,6 +451,47 @@ mod tests {
     }
 
     #[test]
+    fn test_consumer_formula_producers_directly_under_grid_meter() -> Result<(), Error> {
+        // A grid meter whose only children are producer components, with no
+        // separate load meter. The grid meter carries the site's residual
+        // (unmodeled) consumer load, so the producers must be subtracted by
+        // their own readings — the grid meter must NOT be substituted in for the
+        // producer group, which would subtract its whole reading and zero out
+        // the residual load it is meant to report.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+
+        let solar_inverter = builder.solar_inverter();
+        let chp = builder.chp();
+        builder.connect(grid_meter, solar_inverter);
+        builder.connect(grid_meter, chp);
+
+        assert_eq!(grid_meter.component_id(), 1);
+        assert_eq!(solar_inverter.component_id(), 2);
+        assert_eq!(chp.component_id(), 3);
+
+        let graph = builder.build(None)?;
+        let formula = graph.consumer_formula()?.to_string();
+        assert_eq!(
+            formula,
+            concat!(
+                "MAX(",
+                // The grid meter (with a component fallback) minus each
+                // producer's own reading — not the grid meter substituted for
+                // the producer group, which would cancel to zero.
+                "COALESCE(#1, COALESCE(#3, 0.0) + COALESCE(#2, 0.0)) - ",
+                "COALESCE(#2, 0.0) - COALESCE(#3, 0.0), ",
+                "0.0)"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_consumer_formula_without_grid_meter() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
