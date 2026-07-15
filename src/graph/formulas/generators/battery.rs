@@ -109,8 +109,12 @@ mod tests {
         let grid_meter = builder.meter();
         builder.connect(grid, grid_meter);
 
+        // The global setting is meter-first. The battery override flips it
+        // back to component-first. The component-first assertions below hold
+        // only because the per-formula override wins over the global setting.
         let prefer_inverters_config = Some(
             ComponentGraphConfig::builder()
+                .prefer_meters_in_component_formulas(true)
                 .formula_overrides(
                     FormulaOverrides::builder()
                         .prefer_meters_in_battery_formula(false)
@@ -191,7 +195,11 @@ mod tests {
         assert_eq!(meter_pv_chain.component_id(), 14);
 
         let graph = builder.build(prefer_inverters_config)?;
-        let graph_prefer_meters = builder.build(None)?;
+        let graph_prefer_meters = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .prefer_meters_in_component_formulas(true)
+                .build(),
+        ))?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -234,9 +242,12 @@ mod tests {
                 == "InvalidComponent: InverterType not specified for inverter: 20")
         );
 
+        // As above: the component-first assertions hold only because the
+        // per-battery override wins over the global meter-first setting.
         let graph = builder.build(Some(
             ComponentGraphConfig::builder()
                 .allow_unspecified_inverters(true)
+                .prefer_meters_in_component_formulas(true)
                 .formula_overrides(
                     FormulaOverrides::builder()
                         .prefer_meters_in_battery_formula(false)
@@ -247,6 +258,7 @@ mod tests {
         let graph_prefer_meters = builder.build(Some(
             ComponentGraphConfig::builder()
                 .allow_unspecified_inverters(true)
+                .prefer_meters_in_component_formulas(true)
                 .build(),
         ))?;
         let formula = graph.battery_formula(None)?.to_string();

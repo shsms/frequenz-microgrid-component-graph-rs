@@ -857,7 +857,7 @@ mod tests {
         let formula = graph.battery_formula(None)?.to_string();
         // Inverter falls back to its effective predecessor meter,
         // walking past the transformer.
-        assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        assert_eq!(formula, "COALESCE(#3, #1, 0.0)");
         Ok(())
     }
 
@@ -1233,8 +1233,8 @@ mod tests {
     }
 
     /// A meter over a mix of target components and other meters measures the
-    /// targets as the meter minus the sibling meters, with the component
-    /// readings as the fallback.
+    /// targets with the meter minus the sibling meters as the meter-side
+    /// source, ordered against the component readings by the policy.
     ///
     /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3..7 (PV),
     /// Meter:8}` — a "PV + unspecified" meter next to an unspecified sub-meter.
@@ -1289,28 +1289,29 @@ mod tests {
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
             concat!(
-                "COALESCE(#2 - #8, ",
+                "COALESCE(#3 + #4 + #5 + #6 + #7, #2 - #8, ",
                 "COALESCE(#3, 0.0) + COALESCE(#4, 0.0) + COALESCE(#5, 0.0) + ",
                 "COALESCE(#6, 0.0) + COALESCE(#7, 0.0))"
             ),
         );
-        // A partial group (one inverter without its mates) is the meter minus
-        // everything else under it — the working siblings and the sub-meter.
+        // A partial group (one inverter without its mates) falls back to the
+        // meter minus everything else under it — the working siblings and the
+        // sub-meter.
         assert_eq!(
             graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#2 - #4 - #5 - #6 - #7 - #8, #3, 0.0)",
+            "COALESCE(#3, #2 - #4 - #5 - #6 - #7 - #8, 0.0)",
         );
         Ok(())
     }
 
     /// The subtracted siblings may be components rather than meters: a single
-    /// target inverter (e.g. one that is unreachable over the network) is
-    /// measured as the meter minus its working siblings, and a category's
-    /// inverters next to another category's inverter are measured as the meter
+    /// target inverter (e.g. one that is unreachable over the network) falls
+    /// back to the meter minus its working siblings, and a category's
+    /// inverters next to another category's inverter fall back to the meter
     /// minus that inverter.
     #[test]
     fn test_aggregate_subtraction_component_siblings() -> Result<(), Error> {
-        // One inverter out of three, measured as the meter minus the others.
+        // One inverter out of three: the meter minus the others as fallback.
         // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → Inverter:3..5 (PV)`.
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
@@ -1322,7 +1323,7 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#2 - #4 - #5, #3, 0.0)",
+            "COALESCE(#3, #2 - #4 - #5, 0.0)",
         );
 
         // A PV inverter next to a battery inverter: each category is the
@@ -1343,20 +1344,20 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)",
+            "COALESCE(#3, #2 - #4, 0.0)",
         );
         assert_eq!(
             graph.battery_formula(None)?.to_string(),
-            "COALESCE(#2 - #3, #4, 0.0)",
+            "COALESCE(#4, #2 - #3, 0.0)",
         );
         Ok(())
     }
 
     /// The subtraction also applies when the sibling meter is a component
     /// meter, in either order: PV inverters next to a battery sub-meter get
-    /// `pv = mixed - battery_meter`, and battery inverters next to a PV
-    /// sub-meter get `battery = mixed - pv_meter`. The sub-meter's own
-    /// category formula is unaffected.
+    /// `mixed - battery_meter` as their meter-side source, and battery
+    /// inverters next to a PV sub-meter get `mixed - pv_meter`. The
+    /// sub-meter's own category formula is unaffected.
     #[test]
     fn test_aggregate_subtraction_component_sub_meter() -> Result<(), Error> {
         // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3,4 (PV),
@@ -1377,11 +1378,11 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
-            "COALESCE(#2 - #5, COALESCE(#3, 0.0) + COALESCE(#4, 0.0))",
+            "COALESCE(#3 + #4, #2 - #5, COALESCE(#3, 0.0) + COALESCE(#4, 0.0))",
         );
         assert_eq!(
             graph.battery_formula(None)?.to_string(),
-            "COALESCE(#5, #6, 0.0)",
+            "COALESCE(#6, #5, 0.0)",
         );
 
         // The reverse order: battery inverters under the mixed meter, the PV
@@ -1403,9 +1404,9 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.battery_formula(None)?.to_string(),
-            "COALESCE(#2 - #5, #3, 0.0)",
+            "COALESCE(#3, #2 - #5, 0.0)",
         );
-        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#5, #6, 0.0)");
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#6, #5, 0.0)");
         Ok(())
     }
 
@@ -1458,7 +1459,7 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
-            "COALESCE(#3, 0.0) + COALESCE(#4, #5, 0.0)",
+            "COALESCE(#3, 0.0) + COALESCE(#5, #4, 0.0)",
         );
 
         // Parent meter directly under the grid connection point.

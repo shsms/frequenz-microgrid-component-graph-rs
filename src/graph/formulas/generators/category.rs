@@ -86,11 +86,11 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.chp_formula(None)?.to_string(),
-            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
         assert_eq!(
             graph.chp_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)"
+            "COALESCE(#3, #2 - #4, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -98,14 +98,14 @@ mod tests {
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
-                        .prefer_meters_in_chp_formula(false)
+                        .prefer_meters_in_chp_formula(true)
                         .build(),
                 )
                 .build(),
         ))?;
         assert_eq!(
             graph.chp_formula(None)?.to_string(),
-            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
         // Requested targets must match the category.
@@ -137,13 +137,13 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.ev_charger_formula(None)?.to_string(),
-            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
         assert_eq!(
             graph
                 .ev_charger_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)"
+            "COALESCE(#3, #2 - #4, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -151,14 +151,14 @@ mod tests {
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
-                        .prefer_meters_in_ev_charger_formula(false)
+                        .prefer_meters_in_ev_charger_formula(true)
                         .build(),
                 )
                 .build(),
         ))?;
         assert_eq!(
             graph.ev_charger_formula(None)?.to_string(),
-            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
         // Requested targets must match the category.
@@ -190,11 +190,11 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
-            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
         assert_eq!(
             graph.pv_formula(Some(BTreeSet::from([3])))?.to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)"
+            "COALESCE(#3, #2 - #4, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -202,14 +202,14 @@ mod tests {
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
-                        .prefer_meters_in_pv_formula(false)
+                        .prefer_meters_in_pv_formula(true)
                         .build(),
                 )
                 .build(),
         ))?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
-            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
         // Requested targets must match the category.
@@ -241,13 +241,13 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.steam_boiler_formula(None)?.to_string(),
-            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
         assert_eq!(
             graph
                 .steam_boiler_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)"
+            "COALESCE(#3, #2 - #4, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -255,14 +255,14 @@ mod tests {
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
-                        .prefer_meters_in_steam_boiler_formula(false)
+                        .prefer_meters_in_steam_boiler_formula(true)
                         .build(),
                 )
                 .build(),
         ))?;
         assert_eq!(
             graph.steam_boiler_formula(None)?.to_string(),
-            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
         // Requested targets must match the category.
@@ -294,13 +294,13 @@ mod tests {
         let graph = builder.build(None)?;
         assert_eq!(
             graph.wind_turbine_formula(None)?.to_string(),
-            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
         assert_eq!(
             graph
                 .wind_turbine_formula(Some(BTreeSet::from([3])))?
                 .to_string(),
-            "COALESCE(#2 - #4, #3, 0.0)"
+            "COALESCE(#3, #2 - #4, 0.0)"
         );
 
         // The per-category override flips the meter-vs-component preference.
@@ -308,14 +308,14 @@ mod tests {
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
-                        .prefer_meters_in_wind_turbine_formula(false)
+                        .prefer_meters_in_wind_turbine_formula(true)
                         .build(),
                 )
                 .build(),
         ))?;
         assert_eq!(
             graph.wind_turbine_formula(None)?.to_string(),
-            "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
+            "COALESCE(#2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
         // Requested targets must match the category.
