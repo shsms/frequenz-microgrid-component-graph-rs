@@ -452,12 +452,15 @@ mod tests {
 
     #[test]
     fn test_consumer_formula_producers_directly_under_grid_meter() -> Result<(), Error> {
-        // A grid meter whose only children are producer components, with no
-        // separate load meter. The grid meter carries the site's residual
-        // (unmodeled) consumer load, so the producers must be subtracted by
-        // their own readings — the grid meter must NOT be substituted in for the
-        // producer group, which would subtract its whole reading and zero out
-        // the residual load it is meant to report.
+        // A grid meter whose only children are producer components. There is
+        // no separate load meter. The grid meter carries the site's residual
+        // (unmodeled) consumer load. So the producers must be subtracted by
+        // their own readings. The grid meter must NOT stand in for the
+        // producer group: that would subtract its whole reading and zero out
+        // the residual load it is meant to report. For the same reason, the
+        // grid meter is never backed by its children's sum. With the meter
+        // offline, that sum holds only the producers. The formula would then
+        // report a false consumer value of 0 instead of no value.
         let mut builder = ComponentGraphBuilder::new();
         let grid = builder.grid();
 
@@ -477,15 +480,10 @@ mod tests {
         let formula = graph.consumer_formula()?.to_string();
         assert_eq!(
             formula,
-            concat!(
-                "MAX(",
-                // The grid meter (with a component fallback) minus each
-                // producer's own reading — not the grid meter substituted for
-                // the producer group, which would cancel to zero.
-                "COALESCE(#1, COALESCE(#3, 0.0) + COALESCE(#2, 0.0)) - ",
-                "COALESCE(#2, 0.0) - COALESCE(#3, 0.0), ",
-                "0.0)"
-            )
+            // The bare grid meter minus each producer's own reading. The grid
+            // meter does NOT stand in for the producer group; that would
+            // cancel to zero.
+            "MAX(#1 - COALESCE(#2, 0.0) - COALESCE(#3, 0.0), 0.0)",
         );
 
         Ok(())
@@ -733,9 +731,19 @@ mod tests {
 
         let graph = builder.build(None)?;
         let formula = graph.consumer_formula()?.to_string();
-        // The mixed meter (#2) covers its whole group, so it is subtracted once
-        // and the battery sub-meter (#3) is NOT subtracted again on its own.
-        assert_eq!(formula, "MAX(#1 - #2 - COALESCE(#7, #8, 0.0), 0.0)");
+        // The mixed meter (#2) covers its whole group. So it is subtracted
+        // once, and the battery sub-meter (#3) is NOT subtracted again on its
+        // own. The children of #2 back its reading. This is recursive: the
+        // sub-meter's own children (#4) back the sub-meter. So an offline
+        // meter does not make the whole formula null while the leaf
+        // components still report.
+        assert_eq!(
+            formula,
+            concat!(
+                "MAX(#1 - COALESCE(#2, COALESCE(#6, 0.0) + COALESCE(#3, #4, 0.0)) - ",
+                "COALESCE(#7, #8, 0.0), 0.0)"
+            )
+        );
 
         Ok(())
     }

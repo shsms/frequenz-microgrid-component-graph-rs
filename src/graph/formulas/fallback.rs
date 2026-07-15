@@ -7,8 +7,13 @@
 //! upstream meter measures exactly that component and its in-target siblings — by
 //! that meter instead (the substitution in [`measurement_points`]). A meter is
 //! measured by a `COALESCE` of its own reading and the sum of its children,
-//! ordered by the [`SourcePreference`]. Per-child `COALESCE(_, 0)` fallbacks keep the
-//! result total (it always resolves to a value).
+//! ordered by the [`SourcePreference`]. Per-child fallbacks (`COALESCE(_, 0)`
+//! for devices, recursion for child meters) back the reading, so the term
+//! still resolves when the meter is offline but its children report. Two
+//! kinds of meters stay bare, so their terms can go null: a grid meter (it
+//! carries loads that are not in the graph), and one whose children's
+//! readings do not belong to its line alone (a term for such a child would
+//! count flow twice).
 //!
 //! When several parallel meters feed one component group (a diamond), their
 //! readings measure distinct feed lines and so sum to the group's throughput;
@@ -149,9 +154,8 @@ enum Measurement {
 /// twice. A dropped sub-meter stays in `seen`: its flow is inside the
 /// covering point now, so a later seed must not claim it again.
 fn drop_subsumed(points: &mut Vec<Measurement>, subsumed: &[u64]) {
-    points.retain(|point| {
-        !matches!(point, Measurement::Single(single) if subsumed.contains(single))
-    });
+    points
+        .retain(|point| !matches!(point, Measurement::Single(single) if subsumed.contains(single)));
 }
 
 /// Resolves `targets` to the measurement points that cover them: a meter
@@ -507,35 +511,73 @@ fn measure<N: Node, E: Edge>(
     policy: SourcePreference,
 ) -> Result<Expr, Error> {
     let own = Expr::component(id);
-    if !graph.component(id)?.is_meter() {
+    let component = graph.component(id)?;
+    if !component.is_meter() {
         // A component measured directly: its own reading, or 0.
         return Ok(own.coalesce(Expr::number(0.0)));
     }
-    if stands_alone(graph, id, policy)? {
+    let children: Vec<&N> = graph.successors(id)?.collect();
+    let child_ids: BTreeSet<u64> = children.iter().map(|c| c.component_id()).collect();
+    // A child backs the meter only when its reading belongs to this meter's
+    // line alone. A child that feeds a sibling adds no term: the flow it
+    // sends is already inside the fed sibling's reading, so a term for it
+    // would count that flow twice. A child that is also fed from outside
+    // this meter (a parallel meter's line) adds no term either: its reading
+    // holds more than this meter passes. If an excluded child also carries
+    // flow of its own, that share goes unseen — an accepted undercount in
+    // that unusual wiring, and only in the fallback.
+    let meters = BTreeSet::from([id]);
+    let mut kept: Vec<&N> = Vec::new();
+    for child in &children {
+        let child_id = child.component_id();
+        if !reaches_any_below(graph, child_id, &child_ids)?
+            && reached_only_through(graph, child_id, &meters)?
+        {
+            kept.push(child);
+        }
+    }
+    if kept.is_empty() {
+        // Nothing sound to fall back to: the meter is measured bare.
         return Ok(own);
     }
-
-    let children: Vec<&N> = graph.successors(id)?.collect();
-    let missing = || Error::internal("Meter that drills has no successors.");
-    // `best` sums each child's reading-or-0 (child meters are assumed total),
-    // so it always resolves.
-    let best = sum(children.iter().map(|c| child_best_effort_term(*c))).ok_or_else(missing)?;
+    let standing = stands_alone(graph, id, policy)?;
+    // A grid meter stays bare — it carries the site's unmodeled consumer
+    // load, which no sum of its children accounts for.
+    if standing && is_grid_meter(graph, component)? {
+        return Ok(own);
+    }
+    let empty = || Error::internal("Meter children sum is empty.");
+    // `best` sums each kept child's reading-or-0 (child meters resolve
+    // recursively, backed by their own children), so it resolves whenever
+    // anything beneath it reports.
+    let terms = kept
+        .iter()
+        .map(|c| child_best_effort_term(graph, c, policy))
+        .collect::<Result<Vec<_>, _>>()?;
+    let best = sum(terms).ok_or_else(empty)?;
+    if standing {
+        // Standing alone means the meter's own reading is the only primary
+        // source. It does not mean the term may go null when that reading is
+        // missing: the children's best-effort sum still backs it, so the term
+        // stays total.
+        return Ok(own.coalesce(best));
+    }
 
     if policy.prefers_meters() {
         Ok(own.coalesce(best))
     } else {
-        // `exact` is null unless every child reports.
+        // `exact` is null unless every kept child reports.
         let exact =
-            sum(children.iter().map(|c| Expr::component(c.component_id()))).ok_or_else(missing)?;
+            sum(kept.iter().map(|c| Expr::component(c.component_id()))).ok_or_else(empty)?;
         // The last resort after `exact` and the meter:
-        // - multiple children: `best`, the per-child reading-or-0 sum;
-        // - a single device child: a plain 0 (`best` would just repeat the
-        //   child already in `exact`);
-        // - a single child meter: nothing — a meter is total on its own, so no
-        //   trailing term is added.
-        let last_resort = if children.len() > 1 {
+        // - multiple kept children: `best`, the per-child reading-or-0 sum;
+        // - a single kept device child: a plain 0 (`best` would just repeat
+        //   the child already in `exact`);
+        // - a single kept child meter: nothing — a meter is total on its own,
+        //   so no trailing term is added.
+        let last_resort = if kept.len() > 1 {
             best
-        } else if children[0].is_meter() {
+        } else if kept[0].is_meter() {
             Expr::None
         } else {
             Expr::number(0.0)
@@ -620,18 +662,43 @@ fn subtraction_term(
     })
 }
 
-/// A child's contribution to a meter's `best` sum: a child meter is assumed
-/// total (`#id`); any other component falls back to 0 (`COALESCE(#id, 0)`).
-fn child_best_effort_term<N: Node>(child: &N) -> Expr {
-    if child.is_meter() {
-        Expr::component(child.component_id())
-    } else {
-        Expr::coalesce(Expr::component(child.component_id()), Expr::number(0.0))
+/// A child's contribution to a meter's `best` sum. The caller has already
+/// dropped children whose reading does not belong to the meter's line alone
+/// (see the child filter in [`measure`]).
+///
+/// A device child falls back to 0: `COALESCE(#id, 0)`.
+///
+/// A child meter whose children are reached only through it is resolved
+/// recursively through [`measure`]. Its own children then back its reading; a
+/// bare `#id` would make the whole sum null while they still report. Any
+/// other child meter stays a bare `#id`. A meter always measures its own feed
+/// line, so bare readings are safe to sum. But recursing into a child that is
+/// also fed through a sibling (a diamond below this level) would count the
+/// shared component once per feed. A grid meter also stays bare (inside
+/// [`measure`]), and so does a meter without children — there is nothing
+/// below it to fall back to.
+fn child_best_effort_term<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    child: &N,
+    policy: SourcePreference,
+) -> Result<Expr, Error> {
+    let child_id = child.component_id();
+    if !child.is_meter() {
+        return Ok(Expr::coalesce(Expr::component(child_id), Expr::number(0.0)));
     }
+    let meters = BTreeSet::from([child_id]);
+    for successor in graph.successors(child_id)? {
+        if !reached_only_through(graph, successor.component_id(), &meters)? {
+            return Ok(Expr::component(child_id));
+        }
+    }
+    measure(graph, child_id, policy)
 }
 
-/// Whether a meter is measured by its own reading alone (rather than drilling
-/// into its children).
+/// Whether a meter's own reading is the only primary source (rather than
+/// drilling into its children). Inside [`measure`], a stands-alone term is
+/// still backed by the children's best-effort sum; only a grid meter stays
+/// bare.
 fn stands_alone<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
@@ -642,8 +709,9 @@ fn stands_alone<N: Node, E: Edge>(
         return Ok(true);
     }
     if !successors.iter().any(|successor| successor.is_meter()) {
-        // No child meters: drill in and sum them.
-        return Ok(false);
+        // No child meters: drill in and sum them. A grid meter still stands
+        // alone — it never falls back to its children (see [`measure`]).
+        return is_grid_meter(graph, graph.component(id)?);
     }
     // Has a child meter: only drill through a single non-component child meter,
     // and only when meter chains are enabled.
@@ -1289,6 +1357,43 @@ mod tests {
         Ok(())
     }
 
+    /// A stands-alone meter's fallback resolves child meters recursively, so
+    /// the term still evaluates when the meter and its sub-meter are offline
+    /// but the leaf components report.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3 (PV),
+    /// Meter:4 → Inverter:5 → Battery:6}, Meter:7}` — the grid meter (Meter:1)
+    /// also feeds a load (Meter:7) so Meter:2 is an internal meter.
+    #[test]
+    fn test_stands_alone_total_through_child_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let battery_meter = builder.meter_bat_chain(1, 1);
+        builder.connect(mixed_meter, battery_meter);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(None)?;
+        let expr = aggregate(
+            &graph,
+            BTreeSet::from([mixed_meter.component_id()]),
+            SourcePreference::MetersFirst,
+        )?;
+        // The battery sub-meter (#4) is backed by its inverter (#5), not a
+        // bare `#4` that would null the sum while #5 still reports.
+        assert_eq!(
+            expr.to_string(),
+            "COALESCE(#2, COALESCE(#4, #5, 0.0) + COALESCE(#3, 0.0))",
+        );
+        Ok(())
+    }
+
     /// A meter substitution over an asymmetric diamond resolves to the same
     /// diamond regardless of which component id is lower. The seed fed by only
     /// one of the parallel meters is rejected (its sibling is also fed from
@@ -1380,6 +1485,51 @@ mod tests {
         assert_eq!(
             super::measurement_points(&graph, &BTreeSet::from([3, 4, 5]))?,
             vec![super::Measurement::Single(2)],
+        );
+        Ok(())
+    }
+
+    /// A child meter that shares a component with a sibling meter (a diamond
+    /// one level below the meter being backed) stays a bare `#id` in the
+    /// children fallback sum. Recursing into both siblings would resolve each
+    /// to the shared component's reading and count it once per feed.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → {Meter:2 → {Inverter:3 (PV),
+    /// Meter:4, Meter:5}, Meter:7}`, with both Meter:4 and Meter:5 feeding
+    /// Inverter:6 (PV).
+    #[test]
+    fn test_child_meter_diamond_stays_bare() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let pv1 = builder.solar_inverter();
+        builder.connect(mixed_meter, pv1);
+        let m_a = builder.meter();
+        let m_b = builder.meter();
+        builder.connect(mixed_meter, m_a);
+        builder.connect(mixed_meter, m_b);
+        let pv2 = builder.solar_inverter();
+        builder.connect(m_a, pv2);
+        builder.connect(m_b, pv2);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(None)?;
+        // Meters #4 and #5 stay bare — resolving both to their shared
+        // inverter (#6) would subtract its reading twice when the meters are
+        // offline. The sum of bare readings is safe: each meter measures its
+        // own feed line.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([mixed_meter.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "COALESCE(#2, #5 + #4 + COALESCE(#3, 0.0))",
         );
         Ok(())
     }
@@ -1847,6 +1997,248 @@ mod tests {
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
             "COALESCE(#4, 0.0) + COALESCE(#5, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// A child meter that feeds a sibling of its own contributes no term to
+    /// the children fallback sum: the flow it measures is already inside the
+    /// fed sibling's reading, so a bare `#id` next to that sibling's term
+    /// would count the shared line twice.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+    /// Meter:4 → Inverter:5 → Battery:6}`, plus `Meter:2 → Inverter:5`
+    /// directly, and a load (Meter:7) under the grid meter.
+    #[test]
+    fn test_children_fallback_drops_feeder_of_sibling() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let battery_meter = builder.meter();
+        let battery_inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(mixed_meter, battery_meter);
+        builder.connect(battery_meter, battery_inverter);
+        builder.connect(battery_inverter, battery);
+        builder.connect(mixed_meter, battery_inverter);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(None)?;
+        // No bare `#4` next to `COALESCE(#5, 0.0)`: inverter #5's reading
+        // already contains the flow through meter #4.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([mixed_meter.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "COALESCE(#2, COALESCE(#5, 0.0) + COALESCE(#3, 0.0))",
+        );
+        Ok(())
+    }
+
+    /// A child that feeds a sibling through a nested meter is dropped from
+    /// the children fallback too, not only a direct feeder: the flow through
+    /// the nested chain is already inside the fed sibling's reading.
+    #[test]
+    fn test_children_fallback_drops_transitive_feeder() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let sub_a = builder.meter();
+        builder.connect(mixed_meter, sub_a);
+        let sub_b = builder.meter();
+        builder.connect(sub_a, sub_b);
+        let battery_inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(sub_b, battery_inverter);
+        builder.connect(mixed_meter, battery_inverter);
+        builder.connect(battery_inverter, battery);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(None)?;
+        // No term for meter #3 next to the inverter's reading-or-0: inverter
+        // #5's reading already contains the flow through meters #3 and #4.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([mixed_meter.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "COALESCE(#2, #5, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// A device child that feeds a sibling meter is dropped from the children
+    /// fallback: the sibling meter's reading already contains its flow. The
+    /// fed meter is dropped too — it is fed from outside the measured meter,
+    /// so its reading holds more than the measured meter passes. Such edges
+    /// exist only when validation failures are allowed.
+    #[test]
+    fn test_children_fallback_drops_device_feeder() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let battery_inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(mixed_meter, battery_inverter);
+        builder.connect(battery_inverter, battery);
+        let sub_meter = builder.meter();
+        builder.connect(mixed_meter, sub_meter);
+        builder.connect(battery_inverter, sub_meter);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .allow_component_validation_failures(true)
+                .build(),
+        ))?;
+        // No child term at all: inverter #3 feeds sibling #5, and meter #5
+        // is fed by #3 from outside meter #2's line.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([mixed_meter.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "#2",
+        );
+        Ok(())
+    }
+
+    /// A child fed by two parallel meters backs neither meter: its reading
+    /// holds both meters' lines, so it would overstate each. Each meter is
+    /// measured bare; a formula that targets the component itself measures
+    /// the pair as a diamond instead.
+    #[test]
+    fn test_children_fallback_drops_child_shared_with_parallel_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let meter_a = builder.meter();
+        builder.connect(grid_meter, meter_a);
+        let meter_b = builder.meter();
+        builder.connect(grid_meter, meter_b);
+        let battery_inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(meter_a, battery_inverter);
+        builder.connect(meter_b, battery_inverter);
+        builder.connect(battery_inverter, battery);
+        let load_meter = builder.meter();
+        builder.connect(grid_meter, load_meter);
+
+        let graph = builder.build(None)?;
+        // No `COALESCE(#_, #4, 0.0)` terms: inverter #4's reading would be
+        // subtracted once per parallel meter, counting its power twice.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([meter_a.component_id(), meter_b.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "#2 + #3",
+        );
+        Ok(())
+    }
+
+    /// A sub-meter whose `Single` point was dropped for a covering group
+    /// stays claimed: a later target below it must not substitute it back
+    /// in — its flow is already inside the covering point.
+    #[test]
+    fn test_subsumed_sub_meter_stays_claimed() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(grid_meter, pv);
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let sub_meter = builder.meter();
+        let chp = builder.chp();
+        builder.connect(mixed_meter, sub_meter);
+        builder.connect(mixed_meter, chp);
+        let nested_chp = builder.chp();
+        builder.connect(sub_meter, nested_chp);
+
+        let graph = builder.build(None)?;
+        // Seed order: sub-meter #4 first gets its own `Single`; CHP #5 then
+        // substitutes mixed meter #3 in for the whole group and drops that
+        // point. Nested CHP #6 must not claim #4 again — one term, not two.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([
+                    sub_meter.component_id(),
+                    chp.component_id(),
+                    nested_chp.component_id(),
+                ]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "COALESCE(#3, COALESCE(#5, 0.0) + COALESCE(#4, #6, 0.0))",
+        );
+        Ok(())
+    }
+
+    /// A grid meter is never backed by its children's sum, in the drilling
+    /// path too: its reading carries the site's unmodeled consumer load,
+    /// which no sum of its children accounts for. A fallback grid meter (the
+    /// sole child of a grid meter) still backs the outer meter as a chain.
+    #[test]
+    fn test_grid_meter_never_backed_by_children() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let fallback_grid_meter = builder.meter();
+        builder.connect(grid_meter, fallback_grid_meter);
+        let pv = builder.solar_inverter();
+        let chp = builder.chp();
+        builder.connect(fallback_grid_meter, pv);
+        builder.connect(fallback_grid_meter, chp);
+
+        let graph = builder.build(None)?;
+        // The chain falls back from #1 to #2, but never to the device sum:
+        // the devices are only the producers, so their sum would report a
+        // false value while both meters are offline.
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([grid_meter.component_id()]),
+                SourcePreference::MetersFirstWithChains,
+            )?
+            .to_string(),
+            "COALESCE(#1, #2)",
+        );
+        assert_eq!(
+            aggregate(
+                &graph,
+                BTreeSet::from([fallback_grid_meter.component_id()]),
+                SourcePreference::MetersFirst,
+            )?
+            .to_string(),
+            "#2",
         );
         Ok(())
     }
