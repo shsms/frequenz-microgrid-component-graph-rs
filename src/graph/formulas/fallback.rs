@@ -13,6 +13,11 @@
 //! When several parallel meters feed one component group (a diamond), their
 //! readings measure distinct feed lines and so sum to the group's throughput;
 //! the group's own readings are the fallback (see [`diamond`]).
+//!
+//! When a meter's children are a mix of targets and other measured nodes —
+//! sibling meters (e.g. a PV+battery meter over PV inverters and a battery
+//! sub-meter) — the targets are measured as the parent meter minus those
+//! siblings, with the component readings as the fallback (see [`subtraction`]).
 
 use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
@@ -78,6 +83,11 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
                 Measurement::Diamond { components, meters } => {
                     diamond(&components, &meters, policy)
                 }
+                Measurement::Subtraction {
+                    parent_meters,
+                    subtracted,
+                    components,
+                } => subtraction_term(&parent_meters, &subtracted, &components, policy),
             })
             .collect::<Result<_, _>>()?
     };
@@ -96,11 +106,27 @@ enum Measurement {
         components: Vec<u64>,
         meters: Vec<u64>,
     },
+    /// A component group measured as its parent meter(s) minus their other
+    /// children (sibling meters); see [`subtraction`].
+    Subtraction {
+        /// The parent meter(s) whose readings sum to cover the whole group.
+        parent_meters: Vec<u64>,
+        /// The parents' other children — sibling meters or measurable
+        /// non-target components — whose readings are subtracted from the
+        /// parent-meter sum, leaving just what flows through `components`.
+        subtracted: Vec<u64>,
+        /// The target components this point measures. Their value is what
+        /// remains of the parent-meter sum after subtracting every id in
+        /// `subtracted`.
+        components: Vec<u64>,
+    },
 }
 
-/// Resolves `targets` to the nodes actually measured: meters substituted in for
-/// the component groups they exclusively measure, every other target kept as-is.
-/// Ordered by the target that first reaches each node, so the sum is stable.
+/// Resolves `targets` to the measurement points that cover them: a meter
+/// substituted in for the group it exclusively measures, a diamond or a
+/// subtraction for a group next to siblings, and a `Single` for every other
+/// target. Ordered by the target that first reaches each node, so the sum is
+/// stable.
 fn measurement_points<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: &BTreeSet<u64>,
@@ -117,12 +143,9 @@ fn measurement_points<N: Node, E: Edge>(
                 // Several parallel meters feed this group: combine them into one
                 // diamond term rather than measuring each meter independently,
                 // which would double-count the shared group.
-                let mut components: Vec<u64> =
-                    std::iter::once(id).chain(substitution.siblings).collect();
-                components.sort_unstable();
                 seen.extend(&substitution.meters);
                 points.push(Measurement::Diamond {
-                    components,
+                    components: group_components(id, substitution.siblings),
                     meters: substitution.meters,
                 });
             } else {
@@ -132,11 +155,39 @@ fn measurement_points<N: Node, E: Edge>(
                     }
                 }
             }
-        } else if seen.insert(id) {
-            points.push(Measurement::Single(id));
+        } else {
+            match meter_subtraction(graph, id, targets)? {
+                // A parent meter already claimed by an earlier group measures
+                // more than this one, so the subtraction only applies while its
+                // parent meters are all unclaimed.
+                Some(sub) if sub.parent_meters.iter().all(|meter| !seen.contains(meter)) => {
+                    for &component in &sub.components {
+                        remaining.remove(&component);
+                    }
+                    seen.extend(&sub.parent_meters);
+                    points.push(Measurement::Subtraction {
+                        parent_meters: sub.parent_meters,
+                        subtracted: sub.subtracted,
+                        components: sub.components,
+                    });
+                }
+                _ => {
+                    if seen.insert(id) {
+                        points.push(Measurement::Single(id));
+                    }
+                }
+            }
         }
     }
     Ok(points)
+}
+
+/// The full target group a measurement point covers: the seed component plus
+/// the sibling targets it subsumes, sorted for a stable term order.
+fn group_components(seed: u64, siblings: Vec<u64>) -> Vec<u64> {
+    let mut components: Vec<u64> = std::iter::once(seed).chain(siblings).collect();
+    components.sort_unstable();
+    components
 }
 
 /// A component group measured through a meter: the predecessor meter(s) that
@@ -173,15 +224,16 @@ fn meter_substitution<N: Node, E: Edge>(
 
 /// The predecessor meters directly measuring `id`, if `id` is a measurable
 /// component fed by at least one meter. `None` when `id` is not a measurable
-/// component or has no parent meter — in either case the meter substitution
-/// does not apply.
+/// component or has no parent meter — in either case neither the meter
+/// substitution nor the subtraction applies.
 ///
 /// An *internal* meter can also carry a phantom load (see
-/// [`ComponentGraphConfig`]). A substitution would then count that load as
-/// part of the group. This is a known, accepted trade-off: there is no
-/// metadata that says a meter measures only its children, and the meter-side
-/// term is only used when the group's own readings are already missing.
-/// Without it, there would be no value at all.
+/// [`ComponentGraphConfig`]). A substitution or subtraction would then count
+/// that load as part of the group. This is a known, accepted trade-off: there
+/// is no metadata that says a meter measures only its children. With
+/// components first, the meter-side term only fills in when the group's own
+/// readings are missing. With meters first, it is the primary source, so the
+/// phantom load is counted whenever the meter reports.
 fn parent_meters<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
@@ -198,6 +250,200 @@ fn parent_meters<N: Node, E: Edge>(
         return Ok(None);
     }
     Ok(Some(meters))
+}
+
+/// Whether `id` is reached only through the given `meters`: every
+/// predecessor is one of the meters, or is itself a meter reached only
+/// through them (a nested feed). Then the meters' readings account for
+/// `id`'s full throughput. A feed from outside the meters (another meter,
+/// the grid, or an unmodeled source) is not in those readings, so a sum or
+/// difference over them would miscount it.
+fn reached_only_through<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    meters: &BTreeSet<u64>,
+) -> Result<bool, Error> {
+    reached_only_through_inner(graph, id, meters, &mut BTreeSet::new())
+}
+
+/// [`reached_only_through`] with the set of predecessors already checked. A
+/// predecessor in the set counts as reached only through the meters: its check has
+/// already passed, or is still running higher up the call chain. Skipping it
+/// keeps the walk linear on diamonds and stops the recursion on a cyclic
+/// graph (possible only when validation failures are allowed) instead of
+/// overflowing the stack.
+fn reached_only_through_inner<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    meters: &BTreeSet<u64>,
+    checked: &mut BTreeSet<u64>,
+) -> Result<bool, Error> {
+    for predecessor in graph.predecessors(id)? {
+        let predecessor_id = predecessor.component_id();
+        if meters.contains(&predecessor_id) || !checked.insert(predecessor_id) {
+            continue;
+        }
+        if !predecessor.is_meter()
+            || !reached_only_through_inner(graph, predecessor_id, meters, checked)?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Whether the seed and every sibling in its group are reached only through
+/// `meters`. If so, the meter readings cover the group's full throughput. In
+/// an asymmetric diamond, a sibling that is also fed from outside these
+/// meters fails this check. The group then resolves through that sibling
+/// instead: its parent meters cover the whole group, and any point already
+/// emitted for this seed is dropped as covered.
+fn group_reached_only_through<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    siblings: &[u64],
+    meters: &BTreeSet<u64>,
+) -> Result<bool, Error> {
+    for &component in std::iter::once(&id).chain(siblings) {
+        if !reached_only_through(graph, component, meters)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Whether `id` reaches any member of `set` strictly below itself, following
+/// the feed lines downward. `find_all` starts at the node itself, so it is
+/// excluded explicitly (`id` may be in `set`).
+fn reaches_any_below<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    set: &BTreeSet<u64>,
+) -> Result<bool, Error> {
+    Ok(!graph
+        .find_all(
+            id,
+            |node| node.component_id() != id && set.contains(&node.component_id()),
+            petgraph::Direction::Outgoing,
+            false,
+        )?
+        .is_empty())
+}
+
+/// A component group measured as its parent meter(s) minus their other
+/// children, found by [`meter_subtraction`]. The fields mirror
+/// [`Measurement::Subtraction`], which the caller builds from this.
+struct Subtraction {
+    /// The parent meter(s) whose readings sum to cover the whole group.
+    parent_meters: Vec<u64>,
+    /// The parents' other children, subtracted from the parent-meter sum.
+    subtracted: Vec<u64>,
+    /// The target components the measurement covers.
+    components: Vec<u64>,
+}
+
+/// If `id` is a component under a single meter whose non-target children are
+/// all sibling meters — none of them leading to further targets, and each fed
+/// only through that parent — the targets are measured as the parent meter
+/// minus those sibling meters (e.g. a PV+battery meter minus the battery
+/// sub-meter), returned as the [`Subtraction`] covering the whole group.
+/// Otherwise `None` (the component is measured some other way).
+fn meter_subtraction<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    targets: &BTreeSet<u64>,
+) -> Result<Option<Subtraction>, Error> {
+    let Some(meters) = parent_meters(graph, id)? else {
+        return Ok(None);
+    };
+    if meters.len() > 1 {
+        // Several parallel parent meters: left to the diamond handling.
+        return Ok(None);
+    }
+    for &meter in &meters {
+        if graph
+            .predecessors(meter)?
+            .any(|predecessor| predecessor.is_grid())
+        {
+            // A meter directly under the grid connection point carries the
+            // site's unmodeled consumer load (the consumer formula counts its
+            // residual), so its reading is not exhaustive over its graph
+            // children.
+            return Ok(None);
+        }
+    }
+    let mut siblings = Vec::new();
+    let mut minus = Vec::new();
+    for sibling in graph.siblings_from_predecessors(id)? {
+        let sibling_id = sibling.component_id();
+        if targets.contains(&sibling_id) {
+            if sibling.is_meter() {
+                // A target meter sibling: the parent's reading can't be split
+                // cleanly.
+                return Ok(None);
+            }
+            siblings.push(sibling_id);
+        } else if sibling.is_meter() {
+            minus.push(sibling_id);
+        } else {
+            // A sibling with no usable reading: its share of the parent's
+            // reading is unknown.
+            return Ok(None);
+        }
+    }
+    if minus.is_empty() {
+        // Every sibling is a target: `meter_substitution` covers this.
+        return Ok(None);
+    }
+    // The subtracted siblings must measure only what flows through the parent
+    // meters, and must not lead to other targets (those are measured on their
+    // own, so subtracting them here would drop them from the total). A sibling
+    // that is itself one of the parent meters is rejected here too: the seed
+    // below it is always a nested target.
+    for &subtracted in &minus {
+        if !reached_only_through(graph, subtracted, &meters)? {
+            return Ok(None);
+        }
+        if reaches_any_below(graph, subtracted, targets)? {
+            return Ok(None);
+        }
+    }
+    // A subtracted sibling can feed another subtracted sibling — e.g. a
+    // sub-meter next to the inverter it feeds, both under the parent meter.
+    // The feeder's reading measures flow that is already inside the fed
+    // sibling's own reading, so subtracting both would subtract that flow
+    // twice. If all of a feeder's children are subtracted too, they fully
+    // cover its reading, and the feeder is dropped from the difference. Any
+    // other overlap can't be split cleanly, so the subtraction does not apply.
+    let minus_set: BTreeSet<u64> = minus.iter().copied().collect();
+    let mut covered = Vec::new();
+    for &subtracted in &minus {
+        if !reaches_any_below(graph, subtracted, &minus_set)? {
+            continue;
+        }
+        if graph.has_successors(subtracted)?
+            && graph
+                .successors(subtracted)?
+                .all(|child| minus_set.contains(&child.component_id()))
+        {
+            covered.push(subtracted);
+        } else {
+            return Ok(None);
+        }
+    }
+    minus.retain(|subtracted| !covered.contains(subtracted));
+    // The seed and every covered target must be reached only through the
+    // parent meters, so the parent-meter sum accounts for its full
+    // throughput — the same guard the subtracted siblings pass above.
+    if !group_reached_only_through(graph, id, &siblings, &meters)? {
+        return Ok(None);
+    }
+    minus.sort_unstable();
+    Ok(Some(Subtraction {
+        parent_meters: meters.into_iter().collect(),
+        subtracted: minus,
+        components: group_components(id, siblings),
+    }))
 }
 
 /// The measurement expression for a single node.
@@ -219,7 +465,7 @@ fn measure<N: Node, E: Edge>(
     let missing = || Error::internal("Meter that drills has no successors.");
     // `best` sums each child's reading-or-0 (child meters are assumed total),
     // so it always resolves.
-    let best = sum(children.iter().map(|c| child_best_term(*c))).ok_or_else(missing)?;
+    let best = sum(children.iter().map(|c| child_best_effort_term(*c))).ok_or_else(missing)?;
 
     if policy.prefers_meters() {
         Ok(own.coalesce(best))
@@ -244,6 +490,20 @@ fn measure<N: Node, E: Edge>(
     }
 }
 
+/// The exact sum of the nodes' readings (`#a + #b + ...`): null unless every
+/// one reports. `None` when `ids` is empty.
+fn exact_sum(ids: &[u64]) -> Option<Expr> {
+    sum(ids.iter().map(|&id| Expr::component(id)))
+}
+
+/// The best-effort sum of the nodes' readings (`COALESCE(#a, 0) + ...`): each
+/// reading or 0, so it always resolves. `None` when `ids` is empty.
+fn best_effort_sum(ids: &[u64]) -> Option<Expr> {
+    sum(ids
+        .iter()
+        .map(|&id| Expr::coalesce(Expr::component(id), Expr::number(0.0))))
+}
+
 /// The measurement for a component group fed through several parallel meters.
 ///
 /// Each meter measures a distinct feed line into the group, so the meter
@@ -255,22 +515,60 @@ fn measure<N: Node, E: Edge>(
 ///   is dominated by the best-effort one, so it is omitted.
 fn diamond(components: &[u64], meters: &[u64], policy: SourcePreference) -> Result<Expr, Error> {
     let empty = || Error::internal("Diamond measurement with no meters or components.");
-    let component_sum = sum(components.iter().map(|&c| Expr::component(c))).ok_or_else(empty)?;
-    let meter_best = sum(meters
-        .iter()
-        .map(|&m| Expr::coalesce(Expr::component(m), Expr::number(0.0))))
-    .ok_or_else(empty)?;
+    let component_sum = exact_sum(components).ok_or_else(empty)?;
+    let meter_best = best_effort_sum(meters).ok_or_else(empty)?;
     Ok(if policy.prefers_meters() {
-        let meter_sum = sum(meters.iter().map(|&m| Expr::component(m))).ok_or_else(empty)?;
+        let meter_sum = exact_sum(meters).ok_or_else(empty)?;
         meter_sum.coalesce(component_sum).coalesce(meter_best)
     } else {
         component_sum.coalesce(meter_best)
     })
 }
 
+/// The measurement for a component group measured as its parent meter(s) minus
+/// their other children.
+///
+/// The difference measures exactly the group: everything through the parent
+/// meters except what the subtracted siblings account for. Several parallel
+/// parent meters (a diamond) sum to the group's throughput. The siblings are
+/// subtracted by their bare readings — a `COALESCE(_, 0)` there would
+/// attribute a missing sibling's power to the group. Ordered by the
+/// [`SourcePreference`]:
+/// - meters primary: the difference, then the per-component reading-or-0 sum;
+/// - components primary: the exact component sum, then the difference, then
+///   that reading-or-0 sum (or a plain 0 for a single component, which `exact`
+///   already covers).
+fn subtraction_term(
+    parent_meters: &[u64],
+    subtracted: &[u64],
+    components: &[u64],
+    policy: SourcePreference,
+) -> Result<Expr, Error> {
+    let empty = || Error::internal("Subtraction measurement with no components.");
+    let no_meters = || Error::internal("Subtraction measurement with no parent meters.");
+    // Several parallel parent meters (a diamond) sum to the group's throughput;
+    // a single meter is just that sum of one.
+    let meter_sum = exact_sum(parent_meters).ok_or_else(no_meters)?;
+    let difference = subtracted
+        .iter()
+        .fold(meter_sum, |expr, &m| expr - Expr::component(m));
+    let exact = exact_sum(components).ok_or_else(empty)?;
+    let best = best_effort_sum(components).ok_or_else(empty)?;
+    Ok(if policy.prefers_meters() {
+        difference.coalesce(best)
+    } else {
+        let last_resort = if components.len() > 1 {
+            best
+        } else {
+            Expr::number(0.0)
+        };
+        exact.coalesce(difference).coalesce(last_resort)
+    })
+}
+
 /// A child's contribution to a meter's `best` sum: a child meter is assumed
 /// total (`#id`); any other component falls back to 0 (`COALESCE(#id, 0)`).
-fn child_best_term<N: Node>(child: &N) -> Expr {
+fn child_best_effort_term<N: Node>(child: &N) -> Expr {
     if child.is_meter() {
         Expr::component(child.component_id())
     } else {
@@ -886,6 +1184,214 @@ mod tests {
             mixed_meter.component_id(),
             SourcePreference::MetersFirstWithChains,
         )?);
+        Ok(())
+    }
+
+    /// A meter over a mix of target components and other meters measures the
+    /// targets as the meter minus the sibling meters, with the component
+    /// readings as the fallback.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3..7 (PV),
+    /// Meter:8}` — a "PV + unspecified" meter next to an unspecified sub-meter.
+    #[test]
+    fn test_aggregate_subtraction() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let inverters: Vec<_> = (0..5).map(|_| builder.solar_inverter()).collect();
+        for inverter in &inverters {
+            builder.connect(mixed_meter, *inverter);
+        }
+        let sub_meter = builder.meter();
+        builder.connect(mixed_meter, sub_meter);
+
+        let graph = builder.build(None)?;
+        let targets = BTreeSet::from([3, 4, 5, 6, 7]);
+
+        // The group collapses into one subtraction term over the mixed meter.
+        assert_eq!(
+            super::measurement_points(&graph, &targets)?,
+            vec![super::Measurement::Subtraction {
+                parent_meters: vec![mixed_meter.component_id()],
+                subtracted: vec![sub_meter.component_id()],
+                components: vec![3, 4, 5, 6, 7],
+            }],
+        );
+
+        // Meters primary: the difference, then the per-inverter sum.
+        assert_eq!(
+            aggregate(&graph, targets.clone(), SourcePreference::MetersFirst)?.to_string(),
+            concat!(
+                "COALESCE(#2 - #8, ",
+                "COALESCE(#3, 0.0) + COALESCE(#4, 0.0) + COALESCE(#5, 0.0) + ",
+                "COALESCE(#6, 0.0) + COALESCE(#7, 0.0))"
+            ),
+        );
+        // Components primary: the exact sum, the difference, then best-effort.
+        assert_eq!(
+            aggregate(&graph, targets, SourcePreference::ComponentsFirst)?.to_string(),
+            concat!(
+                "COALESCE(#3 + #4 + #5 + #6 + #7, #2 - #8, ",
+                "COALESCE(#3, 0.0) + COALESCE(#4, 0.0) + COALESCE(#5, 0.0) + ",
+                "COALESCE(#6, 0.0) + COALESCE(#7, 0.0))"
+            ),
+        );
+
+        // The PV formula resolves to the subtraction term.
+        assert_eq!(
+            graph.pv_formula(None)?.to_string(),
+            concat!(
+                "COALESCE(#2 - #8, ",
+                "COALESCE(#3, 0.0) + COALESCE(#4, 0.0) + COALESCE(#5, 0.0) + ",
+                "COALESCE(#6, 0.0) + COALESCE(#7, 0.0))"
+            ),
+        );
+        Ok(())
+    }
+
+    /// The subtraction also applies when the sibling meter is a component
+    /// meter, in either order: PV inverters next to a battery sub-meter get
+    /// `pv = mixed - battery_meter`, and battery inverters next to a PV
+    /// sub-meter get `battery = mixed - pv_meter`. The sub-meter's own
+    /// category formula is unaffected.
+    #[test]
+    fn test_aggregate_subtraction_component_sub_meter() -> Result<(), Error> {
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3,4 (PV),
+        // Meter:5 → Inverter:6 → Battery:7}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let pv1 = builder.solar_inverter();
+        let pv2 = builder.solar_inverter();
+        builder.connect(mixed_meter, pv1);
+        builder.connect(mixed_meter, pv2);
+        let battery_meter = builder.meter_bat_chain(1, 1);
+        builder.connect(mixed_meter, battery_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.pv_formula(None)?.to_string(),
+            "COALESCE(#2 - #5, COALESCE(#3, 0.0) + COALESCE(#4, 0.0))",
+        );
+        assert_eq!(
+            graph.battery_formula(None)?.to_string(),
+            "COALESCE(#5, #6, 0.0)",
+        );
+
+        // The reverse order: battery inverters under the mixed meter, the PV
+        // system behind the sub-meter.
+        //
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 →
+        // Battery:4, Meter:5 → Inverter:6 (PV)}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let battery_inverter = builder.inv_bat_chain(1);
+        builder.connect(mixed_meter, battery_inverter);
+        let pv_meter = builder.meter_pv_chain(1);
+        builder.connect(mixed_meter, pv_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.battery_formula(None)?.to_string(),
+            "COALESCE(#2 - #5, #3, 0.0)",
+        );
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#5, #6, 0.0)");
+        Ok(())
+    }
+
+    /// Shapes where the parent meter's reading can't be split cleanly fall
+    /// back to measuring the targets directly:
+    /// - an unmetered non-target sibling (its share is unknown);
+    /// - a sibling meter leading to other targets (they are measured on their
+    ///   own, so subtracting them would drop them from the total);
+    /// - a parent meter directly under the grid connection point (it carries
+    ///   the site's unmodeled consumer load);
+    /// - a sibling meter that is also fed from outside the parent.
+    #[test]
+    fn test_subtraction_disqualifiers() -> Result<(), Error> {
+        // Non-target sibling with no usable reading (a hybrid inverter is not
+        // a measurable component).
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+        // Inverter:4 (hybrid) → Battery:5}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let hybrid = builder.add_component(crate::ComponentCategory::Inverter(
+            crate::InverterType::Hybrid,
+        ));
+        let battery = builder.battery();
+        builder.connect(mixed_meter, hybrid);
+        builder.connect(hybrid, battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#3, 0.0)");
+
+        // Sibling meter leading to another target.
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+        // Meter:4 → Inverter:5 (PV)}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let pv_meter = builder.meter_pv_chain(1);
+        builder.connect(mixed_meter, pv_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.pv_formula(None)?.to_string(),
+            "COALESCE(#3, 0.0) + COALESCE(#4, #5, 0.0)",
+        );
+
+        // Parent meter directly under the grid connection point.
+        // Topology (ids): `Grid:0 → Meter:1 → {Inverter:2 (PV), Meter:3}`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(grid_meter, pv);
+        let sub_meter = builder.meter();
+        builder.connect(grid_meter, sub_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, 0.0)");
+
+        // Sibling meter also fed from outside the parent.
+        // Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Inverter:3 (PV),
+        // Meter:4}`, plus `Meter:1 → Meter:4`.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let main_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        builder.connect(grid, main_meter);
+        builder.connect(main_meter, mixed_meter);
+        let pv = builder.solar_inverter();
+        builder.connect(mixed_meter, pv);
+        let sub_meter = builder.meter();
+        builder.connect(mixed_meter, sub_meter);
+        builder.connect(main_meter, sub_meter);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#3, 0.0)");
         Ok(())
     }
 }
