@@ -154,15 +154,39 @@ fn meter_substitution<N: Node, E: Edge>(
     id: u64,
     targets: &BTreeSet<u64>,
 ) -> Result<Option<Substitution>, Error> {
-    if !is_measurable_component(graph.component(id)?, &graph.config) {
+    let Some(meters) = parent_meters(graph, id)? else {
         return Ok(None);
-    }
+    };
     // `siblings_from_predecessors` already excludes `id` itself and dedups.
     let siblings: Vec<u64> = graph
         .siblings_from_predecessors(id)?
         .map(|sibling| sibling.component_id())
         .collect();
     if !siblings.iter().all(|sibling| targets.contains(sibling)) {
+        return Ok(None);
+    }
+    Ok(Some(Substitution {
+        meters: meters.into_iter().collect(),
+        siblings,
+    }))
+}
+
+/// The predecessor meters directly measuring `id`, if `id` is a measurable
+/// component fed by at least one meter. `None` when `id` is not a measurable
+/// component or has no parent meter — in either case the meter substitution
+/// does not apply.
+///
+/// An *internal* meter can also carry a phantom load (see
+/// [`ComponentGraphConfig`]). A substitution would then count that load as
+/// part of the group. This is a known, accepted trade-off: there is no
+/// metadata that says a meter measures only its children, and the meter-side
+/// term is only used when the group's own readings are already missing.
+/// Without it, there would be no value at all.
+fn parent_meters<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+) -> Result<Option<BTreeSet<u64>>, Error> {
+    if !is_measurable_component(graph.component(id)?, &graph.config) {
         return Ok(None);
     }
     let meters: BTreeSet<u64> = graph
@@ -173,10 +197,7 @@ fn meter_substitution<N: Node, E: Edge>(
     if meters.is_empty() {
         return Ok(None);
     }
-    Ok(Some(Substitution {
-        meters: meters.into_iter().collect(),
-        siblings,
-    }))
+    Ok(Some(meters))
 }
 
 /// The measurement expression for a single node.
