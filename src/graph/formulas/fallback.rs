@@ -17,7 +17,7 @@
 //!
 //! When several parallel meters feed one component group (a diamond), their
 //! readings measure distinct feed lines and so sum to the group's throughput;
-//! the group's own readings are the fallback (see [`diamond`]).
+//! the group's own readings are the fallback (see [`diamond_term`]).
 //!
 //! A meter's children can be a mix: some are targets, others are measured
 //! nodes that are not targets. Those others can be sibling meters (e.g. a
@@ -62,7 +62,7 @@ impl SourcePreference {
     }
 
     /// Whether meter readings are the primary source (components the fallback).
-    fn prefers_meters(self) -> bool {
+    fn meters_first(self) -> bool {
         matches!(
             self,
             SourcePreference::MetersFirst | SourcePreference::MetersFirstWithChains
@@ -104,7 +104,7 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
             .map(|point| match point {
                 Measurement::Single(id) => measure(graph, id, policy),
                 Measurement::Diamond { components, meters } => {
-                    diamond(&components, &meters, policy)
+                    diamond_term(&components, &meters, policy)
                 }
                 Measurement::Subtraction {
                     parent_meters,
@@ -123,7 +123,7 @@ enum Measurement {
     Single(u64),
     /// A component group fed through several parallel meters. The meters sum to
     /// the group's throughput, with the component readings as the fallback; see
-    /// [`diamond`].
+    /// [`diamond_term`].
     Diamond {
         components: Vec<u64>,
         meters: Vec<u64>,
@@ -563,7 +563,7 @@ fn measure<N: Node, E: Edge>(
         return Ok(own.coalesce(best));
     }
 
-    if policy.prefers_meters() {
+    if policy.meters_first() {
         Ok(own.coalesce(best))
     } else {
         // `exact` is null unless every kept child reports.
@@ -609,11 +609,15 @@ fn best_effort_sum(ids: &[u64]) -> Option<Expr> {
 /// - components primary: the component readings, then straight to that
 ///   best-effort sum — the exact meter sum it would otherwise carry in between
 ///   is dominated by the best-effort one, so it is omitted.
-fn diamond(components: &[u64], meters: &[u64], policy: SourcePreference) -> Result<Expr, Error> {
+fn diamond_term(
+    components: &[u64],
+    meters: &[u64],
+    policy: SourcePreference,
+) -> Result<Expr, Error> {
     let empty = || Error::internal("Diamond measurement with no meters or components.");
     let component_sum = exact_sum(components).ok_or_else(empty)?;
     let meter_best = best_effort_sum(meters).ok_or_else(empty)?;
-    Ok(if policy.prefers_meters() {
+    Ok(if policy.meters_first() {
         let meter_sum = exact_sum(meters).ok_or_else(empty)?;
         meter_sum.coalesce(component_sum).coalesce(meter_best)
     } else {
@@ -650,7 +654,7 @@ fn subtraction_term(
         .fold(meter_sum, |expr, &m| expr - Expr::component(m));
     let exact = exact_sum(components).ok_or_else(empty)?;
     let best = best_effort_sum(components).ok_or_else(empty)?;
-    Ok(if policy.prefers_meters() {
+    Ok(if policy.meters_first() {
         difference.coalesce(best)
     } else {
         let last_resort = if components.len() > 1 {
