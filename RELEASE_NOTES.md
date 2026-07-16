@@ -2,7 +2,11 @@
 
 ## Summary
 
-<!-- Here goes a general summary of what this release is about -->
+This release makes formulas more robust when readings are missing, and makes errors easier to inspect.
+
+The formula fallback engine was rewritten. Formulas now use more sources: a component next to siblings under a shared meter can be measured as that meter minus the siblings, and this also covers diamond topologies. Component readings are now the primary source by default, with meters as the fallback.
+
+The API is also simpler in two places: there is one `Formula` type now, and graph validation failures are reported as structured, inspectable errors.
 
 ## Upgrading
 
