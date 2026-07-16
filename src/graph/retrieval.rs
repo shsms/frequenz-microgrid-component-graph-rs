@@ -222,6 +222,40 @@ where
 
         Ok(found)
     }
+
+    /// Whether any component matching the given predicate is reachable from
+    /// the component with the given `component_id`, in the given direction.
+    /// Stops at the first match, unlike [`ComponentGraph::find_all`], which
+    /// collects them all. Pass-through nodes are transparent here too: they
+    /// never match, but the search follows through their neighbors.
+    pub(crate) fn reaches_any(
+        &self,
+        from: u64,
+        pred: impl Fn(&N) -> bool,
+        direction: petgraph::Direction,
+    ) -> Result<bool, Error> {
+        let index = self.node_indices.get(&from).ok_or_else(|| {
+            Error::component_not_found(format!("Component with id {from} not found."))
+        })?;
+        let mut stack = vec![*index];
+        let mut visited = HashSet::new();
+
+        while let Some(index) = stack.pop() {
+            // Skip nodes already expanded: a DAG with diamonds reaches the
+            // same node by multiple paths, and re-expanding it is redundant
+            // (and exponential on chained diamonds).
+            if !visited.insert(index) {
+                continue;
+            }
+            let node = &self.graph[index];
+            if !node.category().is_passthrough() && pred(node) {
+                return Ok(true);
+            }
+            stack.extend(self.graph.neighbors_directed(index, direction));
+        }
+
+        Ok(false)
+    }
 }
 
 #[cfg(test)]

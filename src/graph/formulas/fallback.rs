@@ -29,7 +29,7 @@
 
 use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::expr::Expr;
 
@@ -170,6 +170,9 @@ fn measurement_points<N: Node, E: Edge>(
     let mut remaining = targets.clone();
     let mut points = Vec::new();
     let mut seen = BTreeSet::new();
+    // Subtraction candidates already resolved, keyed by parent-meter set;
+    // see [`meter_subtraction`] for why one result fits every seed.
+    let mut subtractions = BTreeMap::new();
     while let Some(id) = remaining.pop_first() {
         if let Some(substitution) = meter_substitution(graph, id, targets)? {
             for &sibling in &substitution.siblings {
@@ -199,7 +202,7 @@ fn measurement_points<N: Node, E: Edge>(
                 }
             }
         } else {
-            match meter_subtraction(graph, id, targets)? {
+            match meter_subtraction(graph, id, targets, &mut subtractions)? {
                 // A parent meter already claimed by an earlier group measures
                 // more than this one, so the subtraction only applies while its
                 // parent meters are all unclaimed.
@@ -380,26 +383,24 @@ fn group_reached_only_through<N: Node, E: Edge>(
 }
 
 /// Whether `id` reaches any member of `set` strictly below itself, following
-/// the feed lines downward. `find_all` starts at the node itself, so it is
+/// the feed lines downward. The search starts at the node itself, so it is
 /// excluded explicitly (`id` may be in `set`).
 fn reaches_any_below<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     set: &BTreeSet<u64>,
 ) -> Result<bool, Error> {
-    Ok(!graph
-        .find_all(
-            id,
-            |node| node.component_id() != id && set.contains(&node.component_id()),
-            petgraph::Direction::Outgoing,
-            false,
-        )?
-        .is_empty())
+    graph.reaches_any(
+        id,
+        |node| node.component_id() != id && set.contains(&node.component_id()),
+        petgraph::Direction::Outgoing,
+    )
 }
 
 /// A component group measured as its parent meter(s) minus their other
 /// children, found by [`meter_subtraction`]. The fields mirror
 /// [`Measurement::Subtraction`], which the caller builds from this.
+#[derive(Clone)]
 struct Subtraction {
     /// The parent meter(s) whose readings sum to cover the whole group.
     parent_meters: Vec<u64>,
@@ -420,16 +421,40 @@ struct Subtraction {
 /// inverter behind two parallel meters measured as their sum minus the
 /// sibling inverters. Returns the [`Subtraction`] covering the whole group,
 /// or `None` (the component is measured some other way).
+///
+/// The outcome depends only on the parent-meter set, not on the seed: the
+/// group and the subtracted siblings are the parents' children, which are
+/// the same for every seed under those parents. So the result is cached by
+/// that set. Without the cache, a rejected candidate would be rebuilt from
+/// every remaining target under the same parents, walking the same sibling
+/// subtrees each time.
 fn meter_subtraction<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     targets: &BTreeSet<u64>,
+    cache: &mut BTreeMap<BTreeSet<u64>, Option<Subtraction>>,
 ) -> Result<Option<Subtraction>, Error> {
     // The parent meter(s): a single meter, or several in parallel (a diamond),
     // whose readings sum to the throughput into the shared group.
     let Some(meters) = parent_meters(graph, id)? else {
         return Ok(None);
     };
+    if let Some(subtraction) = cache.get(&meters) {
+        return Ok(subtraction.clone());
+    }
+    let subtraction = subtraction_for_parents(graph, id, targets, &meters)?;
+    cache.insert(meters, subtraction.clone());
+    Ok(subtraction)
+}
+
+/// [`meter_subtraction`] after the parent meters are known: checks the
+/// parents' other children and builds the [`Subtraction`], or `None`.
+fn subtraction_for_parents<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    targets: &BTreeSet<u64>,
+    meters: &BTreeSet<u64>,
+) -> Result<Option<Subtraction>, Error> {
     let mut siblings = Vec::new();
     let mut minus = Vec::new();
     for sibling in graph.siblings_from_predecessors(id)? {
@@ -459,7 +484,7 @@ fn meter_subtraction<N: Node, E: Edge>(
     // that is itself one of the parent meters is rejected here too: the seed
     // below it is always a nested target.
     for &subtracted in &minus {
-        if !reached_only_through(graph, subtracted, &meters)? {
+        if !reached_only_through(graph, subtracted, meters)? {
             return Ok(None);
         }
         if reaches_any_below(graph, subtracted, targets)? {
@@ -493,12 +518,12 @@ fn meter_subtraction<N: Node, E: Edge>(
     // The seed and every covered target must be reached only through the
     // parent meters, so the parent-meter sum accounts for its full
     // throughput — the same guard the subtracted siblings pass above.
-    if !group_reached_only_through(graph, id, &siblings, &meters)? {
+    if !group_reached_only_through(graph, id, &siblings, meters)? {
         return Ok(None);
     }
     minus.sort_unstable();
     Ok(Some(Subtraction {
-        parent_meters: meters.into_iter().collect(),
+        parent_meters: meters.iter().copied().collect(),
         subtracted: minus,
         components: group_components(id, siblings),
     }))
