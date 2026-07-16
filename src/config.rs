@@ -4,7 +4,7 @@
 //! This module contains the configuration options for the `ComponentGraph`.
 
 /// Configuration options for the `ComponentGraph`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ComponentGraphConfig {
     /// Whether to allow validation errors on components.  When this is `true`,
     /// the graph will be built even if there are validation errors on
@@ -37,11 +37,11 @@ pub struct ComponentGraphConfig {
 
     /// Default policy for the per-category "component" formulas.
     ///
-    /// When `true` (the default), the meter measurement is the primary
-    /// source and the component measurement is the fallback for the per-
+    /// When `false` (the default), the component measurement is the primary
+    /// source and the meter measurement is the fallback for the per-
     /// category formulas (`battery_formula`, `chp_formula`, `pv_formula`,
     /// `wind_turbine_formula`, `ev_charger_formula`, `steam_boiler_formula`).
-    /// When `false`, the component is primary and the meter is the fallback.
+    /// When `true`, the meter is primary and the component is the fallback.
     ///
     /// Per-formula overrides live in [`formula_overrides`][Self::formula_overrides].
     ///
@@ -52,20 +52,6 @@ pub struct ComponentGraphConfig {
     /// Per-formula overrides for the meter/component preference; see
     /// [`FormulaOverrides`].
     pub(crate) formula_overrides: FormulaOverrides,
-}
-
-impl Default for ComponentGraphConfig {
-    fn default() -> Self {
-        Self {
-            allow_component_validation_failures: false,
-            allow_unconnected_components: false,
-            allow_unspecified_inverters: false,
-            disable_fallback_components: false,
-            include_phantom_loads_in_consumer_formula: false,
-            prefer_meters_in_component_formulas: true,
-            formula_overrides: FormulaOverrides::default(),
-        }
-    }
 }
 
 impl ComponentGraphConfig {

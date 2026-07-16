@@ -11,7 +11,7 @@ use crate::{
     component_category::CategoryPredicates,
     graph::formulas::{
         Formula,
-        fallback::{SourcePreference, aggregate},
+        fallback::{SourcePreference, aggregate, aggregate_terms, is_grid_meter},
         generators::grid::GridFormulaBuilder,
     },
 };
@@ -23,31 +23,6 @@ where
 {
     unvisited_meters: BTreeSet<u64>,
     graph: &'a ComponentGraph<N, E>,
-}
-
-/// Returns true if the node is a grid meter.
-///
-/// A given component is identified as a grid meter if:
-///  - its predecessor is the grid connection point,
-///  - it is a meter,
-///  - it is not a component meter (battery meter, pv meter, etc.).
-fn is_grid_meter<N: Node, E: Edge>(
-    graph: &ComponentGraph<N, E>,
-    component: &N,
-) -> Result<bool, Error> {
-    if let Some(predecessor) = graph.predecessors(component.component_id())?.next() {
-        let sibling_count = graph
-            .siblings_from_predecessors(component.component_id())?
-            .count();
-
-        let is_fallback_grid_meter = is_grid_meter(graph, predecessor)? && sibling_count == 0;
-
-        Ok((predecessor.is_grid() || is_fallback_grid_meter)
-            && component.is_meter()
-            && !graph.is_component_meter(component.component_id())?)
-    } else {
-        Ok(false)
-    }
 }
 
 impl<'a, N, E> ConsumerFormulaBuilder<'a, N, E>
@@ -187,17 +162,20 @@ where
         )?;
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
 
+        // Measure the non-consumer components as one group. Siblings that
+        // share a meter (e.g. inverters under a mixed "PV + CHP" meter) then
+        // resolve to that meter once. Otherwise each sibling would subtract
+        // the others as a meter-minus-siblings difference, and the meter
+        // would be counted twice.
+        let mut targets = BTreeSet::new();
         for component_id in non_consumer_components {
             if is_grid_meter(self.graph, self.graph.component(component_id)?)? {
                 continue;
             }
-            let component_with_fallback = aggregate(
-                self.graph,
-                BTreeSet::from([component_id]),
-                SourcePreference::MetersFirst,
-            )?;
-
-            expr = expr - component_with_fallback;
+            targets.insert(component_id);
+        }
+        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+            expr = expr - term;
         }
 
         Ok(Formula::new(expr.max(Expr::number(0.0))))
@@ -380,7 +358,7 @@ mod tests {
                 "#1 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
-                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0), ",
+                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)), ",
                 "0.0)"
             )
         );
@@ -463,10 +441,49 @@ mod tests {
                 "#1 + #15 - ",
                 "COALESCE(#2, #3, 0.0) - ",
                 "COALESCE(#5, COALESCE(#7, 0.0) + COALESCE(#6, 0.0)) - ",
-                "COALESCE(#8, 0.0) - COALESCE(#9, 0.0) - COALESCE(#10, 0.0) - ",
+                "COALESCE(#11, COALESCE(#10, 0.0) + COALESCE(#9, 0.0) + COALESCE(#8, 0.0)) - ",
                 "COALESCE(#12, #13, 0.0), ",
                 "0.0)",
             )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_consumer_formula_producers_directly_under_grid_meter() -> Result<(), Error> {
+        // A grid meter whose only children are producer components. There is
+        // no separate load meter. The grid meter carries the site's residual
+        // (unmodeled) consumer load. So the producers must be subtracted by
+        // their own readings. The grid meter must NOT stand in for the
+        // producer group: that would subtract its whole reading and zero out
+        // the residual load it is meant to report. For the same reason, the
+        // grid meter is never backed by its children's sum. With the meter
+        // offline, that sum holds only the producers. The formula would then
+        // report a false consumer value of 0 instead of no value.
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+
+        let solar_inverter = builder.solar_inverter();
+        let chp = builder.chp();
+        builder.connect(grid_meter, solar_inverter);
+        builder.connect(grid_meter, chp);
+
+        assert_eq!(grid_meter.component_id(), 1);
+        assert_eq!(solar_inverter.component_id(), 2);
+        assert_eq!(chp.component_id(), 3);
+
+        let graph = builder.build(None)?;
+        let formula = graph.consumer_formula()?.to_string();
+        assert_eq!(
+            formula,
+            // The bare grid meter minus each producer's own reading. The grid
+            // meter does NOT stand in for the producer group; that would
+            // cancel to zero.
+            "MAX(#1 - COALESCE(#2, 0.0) - COALESCE(#3, 0.0), 0.0)",
         );
 
         Ok(())
@@ -675,6 +692,56 @@ mod tests {
                 "COALESCE(MAX(#4 - #5, 0.0), 0.0) + COALESCE(MAX(#6 - #7, 0.0), 0.0) + ",
                 // difference of battery inverter from battery meter
                 "COALESCE(MAX(#9 - #10, 0.0), 0.0)"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_consumer_formula_mixed_meter_with_component_submeter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+
+        // A "mixed" meter feeds a PV inverter and a battery sub-meter (itself
+        // a component chain). The battery sub-meter's id sorts before the PV
+        // inverter's id. So the sub-meter is first resolved onto its own
+        // measurement point. Only after that does the sibling PV inverter
+        // reveal that the mixed meter covers the whole group.
+        let mixed_meter = builder.meter();
+        builder.connect(grid_meter, mixed_meter);
+        let bat_submeter = builder.meter_bat_chain(1, 1);
+        builder.connect(mixed_meter, bat_submeter);
+        let solar_inverter = builder.solar_inverter();
+        builder.connect(mixed_meter, solar_inverter);
+
+        // A second grid-meter child so the mixed meter is not its sole child
+        // (which would make the mixed meter a fallback grid meter).
+        let pv_meter = builder.meter_pv_chain(1);
+        builder.connect(grid_meter, pv_meter);
+
+        assert_eq!(grid.component_id(), 0);
+        assert_eq!(grid_meter.component_id(), 1);
+        assert_eq!(mixed_meter.component_id(), 2);
+        assert_eq!(bat_submeter.component_id(), 3);
+        assert_eq!(solar_inverter.component_id(), 6);
+        assert_eq!(pv_meter.component_id(), 7);
+
+        let graph = builder.build(None)?;
+        let formula = graph.consumer_formula()?.to_string();
+        // The mixed meter (#2) covers its whole group. So it is subtracted
+        // once, and the battery sub-meter (#3) is NOT subtracted again on its
+        // own. The children of #2 back its reading. This is recursive: the
+        // sub-meter's own children (#4) back the sub-meter. So an offline
+        // meter does not make the whole formula null while the leaf
+        // components still report.
+        assert_eq!(
+            formula,
+            concat!(
+                "MAX(#1 - COALESCE(#2, COALESCE(#6, 0.0) + COALESCE(#3, #4, 0.0)) - ",
+                "COALESCE(#7, #8, 0.0), 0.0)"
             )
         );
 
