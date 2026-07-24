@@ -153,4 +153,63 @@ mod tests {
 
         Ok(())
     }
+
+    /// The grid formula skips a PowerTransformer directly below the grid
+    /// connection point and uses the meter beneath it as the measurement
+    /// source. The formula is the same as for the equivalent
+    /// `Grid → Meter → Inverter → Battery` graph.
+    ///
+    /// Topology (component ids): `Grid:0 → PT:1 → Meter:2 → Inverter:3 → Battery:4`
+    #[test]
+    fn test_grid_formula_skips_passthrough_at_root() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, pt);
+        builder.connect(pt, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_formula()?.to_string();
+        assert!(
+            !formula.contains("#1"),
+            "PowerTransformer #1 must not appear in grid_formula, got {formula:?}",
+        );
+        assert_eq!(formula, "COALESCE(#2, #3, 0.0)");
+        Ok(())
+    }
+
+    /// A meter is measured from its *effective* successors: the walk passes
+    /// the pass-through and reaches the inverter. The transformer itself has
+    /// no measurement, so it is not part of the formula.
+    ///
+    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
+    #[test]
+    fn test_grid_formula_skips_passthrough_successor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let pt = builder.power_transformer();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, pt);
+        builder.connect(pt, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        let formula = graph.grid_formula()?.to_string();
+        assert!(
+            !formula.contains("#2"),
+            "PowerTransformer #2 must not appear in grid_formula, got {formula:?}",
+        );
+        assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        Ok(())
+    }
 }

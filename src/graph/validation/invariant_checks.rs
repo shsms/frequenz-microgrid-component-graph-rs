@@ -139,3 +139,33 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::Error;
+    use crate::graph::test_utils::ComponentGraphBuilder;
+
+    /// A pass-through component before the grid connection point is
+    /// accepted. The effective predecessors view walks past it, so
+    /// `ensure_root` sees no ancestor and accepts the grid connection
+    /// point as a root.
+    ///
+    /// Topology: `PT → Grid → Meter → BatteryInverter → Battery`.
+    #[test]
+    fn test_ensure_root_tolerates_passthrough_predecessor() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pt = builder.power_transformer();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+
+        builder.connect(pt, grid);
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        let _graph = builder.build(None)?;
+        Ok(())
+    }
+}

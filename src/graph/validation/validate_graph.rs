@@ -100,7 +100,9 @@ mod tests {
     use crate::ComponentGraphConfig;
     use crate::InverterType;
     use crate::component_category::BatteryType;
-    use crate::graph::test_utils::{TestComponent, TestConnection, validation_error};
+    use crate::graph::test_utils::{
+        ComponentGraphBuilder, TestComponent, TestConnection, validation_error,
+    };
 
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
         let components = vec![
@@ -287,5 +289,38 @@ mod tests {
             .build();
 
         assert!(ComponentGraph::try_new(components, connections, config).is_err());
+    }
+
+    /// A pass-through-only cycle attached to an otherwise-valid graph
+    /// is rejected at construction time. The acyclicity validator
+    /// walks the raw graph so cycles composed entirely of pass-through
+    /// nodes are still detected.
+    ///
+    /// Topology: a normal `Grid → Meter → BatteryInverter → Battery`
+    /// branch, plus a side-branch `Grid → PT1 → PT2 → PT3 → PT1` cycle.
+    #[test]
+    fn test_acyclicity_detects_passthrough_only_cycle() {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        let pt1 = builder.power_transformer();
+        let pt2 = builder.power_transformer();
+        let pt3 = builder.power_transformer();
+
+        builder.connect(grid, meter);
+        builder.connect(meter, inverter);
+        builder.connect(inverter, battery);
+
+        builder.connect(grid, pt1);
+        builder.connect(pt1, pt2);
+        builder.connect(pt2, pt3);
+        builder.connect(pt3, pt1);
+
+        assert!(
+            builder.build(None).is_err(),
+            "PT-only cycle reachable from the GCP must be detected at construction time"
+        );
     }
 }
