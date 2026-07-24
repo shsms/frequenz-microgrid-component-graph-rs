@@ -52,6 +52,7 @@ use crate::{ComponentGraph, Edge, Error, Node};
 
 use super::expr::Expr;
 use emit::{diamond_term, measure, subtraction_term, sum};
+pub(super) use predicates::ids_with_telemetry;
 pub(crate) use predicates::is_grid_meter;
 use resolve::{Measurement, measurement_points};
 
@@ -119,20 +120,31 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
     policy: SourcePreference,
 ) -> Result<Vec<Expr>, Error> {
     if graph.config.disable_fallback_components {
-        Ok(targets.into_iter().map(Expr::component).collect())
+        // Without fallback, each target is measured by its own reading; a target
+        // that provides no telemetry has no reading to emit, so it is dropped.
+        let mut terms: Vec<Expr> = ids_with_telemetry(graph, targets.iter().copied())?
+            .into_iter()
+            .map(Expr::component)
+            .collect();
+        // If every target was dropped for lack of telemetry, keep the term total
+        // with a 0.0. A genuinely empty target set stays empty, as before.
+        if terms.is_empty() && !targets.is_empty() {
+            terms.push(Expr::number(0.0));
+        }
+        Ok(terms)
     } else {
         measurement_points(graph, &targets)?
             .into_iter()
             .map(|point| match point {
                 Measurement::Single(id) => measure(graph, id, policy),
                 Measurement::Diamond { components, meters } => {
-                    diamond_term(&components, &meters, policy)
+                    diamond_term(graph, &components, &meters, policy)
                 }
                 Measurement::Subtraction {
                     parent_meters,
                     subtracted,
                     components,
-                } => subtraction_term(&parent_meters, &subtracted, &components, policy),
+                } => subtraction_term(graph, &parent_meters, &subtracted, &components, policy),
             })
             .collect()
     }

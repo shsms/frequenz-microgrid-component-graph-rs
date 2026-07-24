@@ -11,7 +11,7 @@
 
 use crate::{
     BatteryType, ComponentCategory, ComponentGraph, ComponentGraphConfig, Edge, Error,
-    EvChargerType, InverterType, Node, ValidationError,
+    EvChargerType, InverterType, Node, OperationalMode, ValidationError,
 };
 
 /// Builds the [`Error`] that validation returns when it collects a single
@@ -21,11 +21,11 @@ pub(super) fn validation_error(message: &str, component_ids: &[u64]) -> Error {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct TestComponent(u64, ComponentCategory);
+pub(super) struct TestComponent(u64, ComponentCategory, OperationalMode);
 
 impl TestComponent {
     pub(super) fn new(id: u64, category: ComponentCategory) -> Self {
-        TestComponent(id, category)
+        TestComponent(id, category, OperationalMode::Unspecified)
     }
 }
 
@@ -36,6 +36,10 @@ impl Node for TestComponent {
 
     fn category(&self) -> ComponentCategory {
         self.1
+    }
+
+    fn operational_mode(&self) -> OperationalMode {
+        self.2
     }
 }
 
@@ -93,11 +97,7 @@ impl ComponentGraphBuilder {
 
     /// Adds a component to the graph and returns its handle.
     pub(super) fn add_component(&mut self, category: ComponentCategory) -> ComponentHandle {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.components.push(TestComponent::new(id, category));
-
-        ComponentHandle(id)
+        self.add_component_with_mode(category, OperationalMode::Unspecified)
     }
 
     /// Adds a component with the given id to the graph and returns its handle.
@@ -107,6 +107,20 @@ impl ComponentGraphBuilder {
         category: ComponentCategory,
     ) -> ComponentHandle {
         self.components.push(TestComponent::new(id, category));
+
+        ComponentHandle(id)
+    }
+
+    /// Adds a component with the given operational mode to the graph and returns
+    /// its handle.
+    pub(super) fn add_component_with_mode(
+        &mut self,
+        category: ComponentCategory,
+        mode: OperationalMode,
+    ) -> ComponentHandle {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.components.push(TestComponent(id, category, mode));
 
         ComponentHandle(id)
     }

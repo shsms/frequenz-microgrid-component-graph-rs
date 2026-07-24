@@ -49,6 +49,12 @@ where
         }
         let mut all_meters = None;
         while let Some(meter_id) = self.unvisited_meters.pop_first() {
+            // A meter that provides no telemetry has no reading, so its phantom
+            // load (its residual) is unknowable and it contributes no term. Its
+            // nested meters still get their own terms.
+            if !self.graph.component(meter_id)?.provides_telemetry() {
+                continue;
+            }
             let consumption = self.component_consumption(meter_id)?;
             if let Some(expr) = all_meters {
                 all_meters = Some(expr + consumption);
@@ -60,7 +66,13 @@ where
         let other_grid_successors = self
             .graph
             .successors(self.graph.root_id)?
-            .filter(|s| !s.is_meter() && !s.is_battery_inverter(&self.graph.config))
+            .filter(|s| {
+                !s.is_meter()
+                    && !s.is_battery_inverter(&self.graph.config)
+                    // A component that provides no telemetry has no reading to
+                    // count as consumption.
+                    && s.provides_telemetry()
+            })
             .map(|s| self.component_consumption(s.component_id()))
             .reduce(|a, b| Ok(a? + b?));
 
@@ -93,7 +105,12 @@ where
                     .map(|s| (s.component_id(), s)),
             );
             for sibling in self.graph.siblings_from_successors(component_id)? {
-                expr = expr + sibling.into();
+                // A sibling that provides no telemetry has no reading to add to
+                // the diamond sum; the shared successors are still merged, so
+                // the group's residual stays best-effort instead of going null.
+                if sibling.provides_telemetry() {
+                    expr = expr + sibling.into();
+                }
                 self.unvisited_meters.remove(&sibling.component_id());
                 for successor in self.graph.successors(sibling.component_id())? {
                     successors.insert(successor.component_id(), successor);
@@ -108,8 +125,12 @@ where
                         BTreeSet::from([successor.0]),
                         SourcePreference::MetersFirst,
                     )?
-                } else {
+                } else if successor.1.provides_telemetry() {
                     Expr::from(successor.1)
+                } else {
+                    // No reading to subtract: the component's share stays in
+                    // the meter's residual, i.e. counts as phantom load.
+                    continue;
                 };
                 expr = expr - successor_expr;
             }
@@ -190,14 +211,44 @@ where
                         .graph
                         .is_component_meter(node.component_id())
                         .unwrap_or(false)
+                    // A meter that provides no telemetry has no reading to sum;
+                    // not matching it makes discovery descend past it, so its
+                    // reporting descendant meters are summed instead.
+                    && node.provides_telemetry()
             },
             petgraph::Direction::Outgoing,
             false,
         )?;
 
+        // Discovery descends past a no-telemetry meter, so on a parallel
+        // feed it can collect a meter that a collected meter above it
+        // already measures. Keep only the topmost collected meters: a
+        // covered line is then counted once. What the covered meter gets
+        // through the silent feed alone goes uncounted; no reading
+        // separates it.
+        let mut kept = Vec::new();
+        for id in &consumer_components {
+            let mut covered = false;
+            for other in &consumer_components {
+                if other != id
+                    && self.graph.reaches_any(
+                        *other,
+                        |node| node.component_id() == *id,
+                        petgraph::Direction::Outgoing,
+                    )?
+                {
+                    covered = true;
+                    break;
+                }
+            }
+            if !covered {
+                kept.push(*id);
+            }
+        }
+
         let mut expr = None;
 
-        for component_id in consumer_components {
+        for component_id in kept {
             let component = Expr::component(component_id);
             expr = match expr {
                 None => Some(component),
@@ -215,7 +266,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ComponentGraphConfig, graph::test_utils::ComponentGraphBuilder};
+    use crate::{
+        ComponentCategory, ComponentGraphConfig, InverterType, OperationalMode,
+        graph::test_utils::ComponentGraphBuilder,
+    };
 
     #[test]
     fn test_zero_consumers() -> Result<(), Error> {
@@ -593,6 +647,220 @@ mod tests {
         let formula = graph_no_phantom.consumer_formula()?.to_string();
         assert_eq!(formula, "MAX(#6 + #7, 0.0)");
 
+        Ok(())
+    }
+
+    /// In the no-grid-meter consumer formula, a consumer meter that provides no
+    /// telemetry has no reading and is dropped from the sum.
+    ///
+    /// Topology (ids): `Grid:0 → BatMeter:1 → Inv:2 → Bat:3`, plus dangling
+    /// consumer meters `Grid:0 → Meter:4` and `Grid:0 → Meter:5 (no telemetry)`.
+    #[test]
+    fn test_consumer_formula_without_grid_meter_skips_no_telemetry() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        // A battery chain keeps at least one non-grid-meter successor, selecting
+        // the no-grid-meter branch.
+        let meter_bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid, meter_bat_chain);
+        let dangling = builder.meter();
+        let dangling_no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        builder.connect(grid, dangling);
+        builder.connect(grid, dangling_no_telemetry);
+
+        assert_eq!(dangling.component_id(), 4);
+        assert_eq!(dangling_no_telemetry.component_id(), 5);
+
+        let graph = builder.build(None)?;
+        // Only the reporting dangling meter #4 is summed; #5 is dropped.
+        assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#4, 0.0)");
+        Ok(())
+    }
+
+    /// In the no-grid-meter consumer formula, a no-telemetry consumer meter is
+    /// measured by its reporting descendant meters instead of hiding its
+    /// subtree.
+    ///
+    /// Topology (ids): `Grid:0 → BatMeter:1 → Inv:2 → Bat:3`, plus
+    /// `Grid:0 → Meter:4 (no telemetry) → Meter:5`.
+    #[test]
+    fn test_consumer_formula_without_grid_meter_no_telemetry_meter_children() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        // A battery chain keeps at least one non-grid-meter successor, selecting
+        // the no-grid-meter branch.
+        let meter_bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid, meter_bat_chain);
+        let no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let child = builder.meter();
+        builder.connect(grid, no_telemetry);
+        builder.connect(no_telemetry, child);
+
+        assert_eq!(child.component_id(), 5);
+
+        let graph = builder.build(None)?;
+        // Meter #4 has no reading; its reporting child meter #5 is summed in its
+        // place.
+        assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#5, 0.0)");
+        Ok(())
+    }
+
+    /// In the phantom-loads consumer formula, a component that provides no
+    /// telemetry is not subtracted from its meter (its share counts as phantom
+    /// load), and never contributes a reading.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → {Meter:2, PV:3 (no telemetry)}`.
+    #[test]
+    fn test_consumer_formula_phantom_loads_skips_no_telemetry() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let sub_meter = builder.meter();
+        builder.connect(grid_meter, sub_meter);
+        let pv_no_telemetry = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Pv),
+            OperationalMode::ControlOnly,
+        );
+        builder.connect(grid_meter, pv_no_telemetry);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
+        // #3 is neither subtracted from meter #1 nor given a term of its own; its
+        // consumption stays in meter #1's residual.
+        assert_eq!(
+            graph.consumer_formula()?.to_string(),
+            "MAX(#1 - #2, 0.0) + MAX(#2, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// In the phantom-loads consumer formula, a meter that provides no telemetry
+    /// contributes no residual term, and a no-telemetry non-meter grid successor
+    /// contributes nothing.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 (no telemetry) → Meter:2`, plus
+    /// `Grid:0 → CHP:3 (no telemetry)`.
+    #[test]
+    fn test_consumer_formula_phantom_loads_skips_no_telemetry_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let child = builder.meter();
+        builder.connect(grid, no_telemetry);
+        builder.connect(no_telemetry, child);
+        let chp_no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Chp, OperationalMode::ControlOnly);
+        builder.connect(grid, chp_no_telemetry);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
+        // Meter #1's residual is unknowable and CHP #3 has no reading; only the
+        // reporting meter #2 keeps a term.
+        assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#2, 0.0)");
+        Ok(())
+    }
+
+    /// In the phantom-loads consumer formula, a diamond sibling meter that
+    /// provides no telemetry is left out of the diamond sum while the shared
+    /// successors are still subtracted.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2 (no telemetry)} → Meter:3`.
+    #[test]
+    fn test_consumer_formula_phantom_loads_no_telemetry_diamond_sibling() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter = builder.meter();
+        let sibling_no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let shared = builder.meter();
+        builder.connect(grid, meter);
+        builder.connect(grid, sibling_no_telemetry);
+        builder.connect(meter, shared);
+        builder.connect(sibling_no_telemetry, shared);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
+        // Sibling #2's reading is left out of the diamond sum; the shared meter
+        // #3 is still subtracted and keeps its own residual term.
+        assert_eq!(
+            graph.consumer_formula()?.to_string(),
+            "MAX(#1 - #3, 0.0) + MAX(#3, 0.0)",
+        );
+        Ok(())
+    }
+
+    /// A reporting meter whose only child is a no-telemetry meter resolves
+    /// through it: the grandchild reading backs the meter's own reading in
+    /// the subtracted term, instead of a 0.0 that would hide it.
+    ///
+    /// Topology (ids): `Grid:0 → GridMeter:1 → {Meter:2 → Meter:3 (no
+    /// telemetry) → Meter:4, Meter:5}`.
+    #[test]
+    fn test_consumer_formula_recurses_through_no_telemetry_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let meter = builder.meter();
+        let silent =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let descendant = builder.meter();
+        let load = builder.meter();
+        builder.connect(grid_meter, meter);
+        builder.connect(meter, silent);
+        builder.connect(silent, descendant);
+        builder.connect(grid_meter, load);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
+        // Line 2 is subtracted as COALESCE(#2, #4): the silent meter #3's
+        // reporting child #4 backs #2's reading.
+        assert_eq!(
+            graph.consumer_formula()?.to_string(),
+            "MAX(#1 - COALESCE(#2, #4) - #5, 0.0) + MAX(#2 - #4, 0.0) + MAX(#4, 0.0) + MAX(#5, 0.0)"
+        );
+        Ok(())
+    }
+
+    /// A no-telemetry consumer meter on a parallel feed is descended past,
+    /// but a descendant meter that another collected meter already measures
+    /// is not summed next to it: that line would be counted twice.
+    ///
+    /// Topology (ids): `Grid:0 → {BatMeter:1 → Inv:2 → Bat:3, Meter:4 (no
+    /// telemetry), Meter:5}`, with `4 → 6` and `5 → 6`.
+    #[test]
+    fn test_consumer_formula_no_telemetry_shared_descendant() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let bat_meter = builder.meter_bat_chain(1, 1);
+        builder.connect(grid, bat_meter);
+        let sibling_no_telemetry =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let sibling = builder.meter();
+        let shared = builder.meter();
+        builder.connect(grid, sibling_no_telemetry);
+        builder.connect(grid, sibling);
+        builder.connect(sibling_no_telemetry, shared);
+        builder.connect(sibling, shared);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#5, 0.0)");
         Ok(())
     }
 

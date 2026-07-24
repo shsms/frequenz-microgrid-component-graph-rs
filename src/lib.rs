@@ -6,6 +6,9 @@
 mod component_category;
 pub use component_category::{BatteryType, ComponentCategory, EvChargerType, InverterType};
 
+mod operational_mode;
+pub use operational_mode::OperationalMode;
+
 mod graph;
 pub use graph::{ComponentGraph, Formula, iterators};
 

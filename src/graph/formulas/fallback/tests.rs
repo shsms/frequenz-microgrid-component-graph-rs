@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use super::{SourcePreference, aggregate};
 use crate::graph::test_utils::ComponentGraphBuilder;
-use crate::{ComponentGraphConfig, Error};
+use crate::{ComponentCategory, ComponentGraphConfig, Error, InverterType, OperationalMode};
 
 /// Test fallback expression generation when there are no meters in the
 /// graph, with only PV inverters directly connected to the grid.
@@ -1710,5 +1710,391 @@ fn test_subtraction_diamond_subsume_order_independent() -> Result<(), Error> {
             "shared_id_first: {shared_id_first}",
         );
     }
+    Ok(())
+}
+
+/// A component that provides no telemetry is dropped as a measurement source
+/// but still measured through its meter, and still classifies that meter.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → PVMeter:2 → {PV:3, PV:4 (no
+/// telemetry)}`.
+#[test]
+fn test_no_telemetry_component_measured_via_meter() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let pv_meter = builder.meter();
+    builder.connect(grid_meter, pv_meter);
+    let pv = builder.solar_inverter();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    builder.connect(pv_meter, pv);
+    builder.connect(pv_meter, pv_no_telemetry);
+
+    let graph = builder.build(None)?;
+
+    // The no-telemetry inverter #4 is not a measurement source: the meter #2
+    // measures it, and only the reporting inverter #3 backs the meter.
+    assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, #3, 0.0)",);
+
+    // It still classifies the meter as a PV meter.
+    assert!(graph.is_pv_meter(pv_meter.component_id())?);
+    assert!(graph.is_pv_chain(pv_no_telemetry.component_id())?);
+    Ok(())
+}
+
+/// A reporting meter whose children all lack telemetry stands alone on its
+/// reading, backed by 0.0 so the term stays total.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → PVMeter:2 → PV:3 (no telemetry)`,
+/// plus `Meter:1 → Meter:4` so Meter:2 isn't a sole-child fallback grid
+/// meter.
+#[test]
+fn test_no_telemetry_children_meter_stays_total() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let pv_meter = builder.meter();
+    builder.connect(grid_meter, pv_meter);
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    builder.connect(pv_meter, pv_no_telemetry);
+    let other_meter = builder.meter();
+    builder.connect(grid_meter, other_meter);
+
+    let graph = builder.build(None)?;
+    // Meter #2's reading is the only source for PV:3, but the term must not
+    // go null with it.
+    assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, 0.0)");
+    Ok(())
+}
+
+/// A no-telemetry component with no meter to measure it contributes nothing
+/// (its reading is never emitted).
+///
+/// Topology (ids): `Grid:0 → PV:1 (no telemetry)`.
+#[test]
+fn test_no_telemetry_meterless_component_dropped() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::Inactive,
+    );
+    builder.connect(grid, pv_no_telemetry);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.pv_formula(None)?.to_string(), "0.0");
+    Ok(())
+}
+
+/// In a diamond, a no-telemetry target drops out of the component-side term,
+/// leaving the meters as the sole source of the group total.
+///
+/// Topology (ids): `Grid:0 → {Meter:1, Meter:2} → {PV:3, PV:4 (no
+/// telemetry)}`.
+#[test]
+fn test_no_telemetry_in_diamond() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let m1 = builder.meter();
+    let m2 = builder.meter();
+    builder.connect(grid, m1);
+    builder.connect(grid, m2);
+    let pv = builder.solar_inverter();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    for meter in [m1, m2] {
+        builder.connect(meter, pv);
+        builder.connect(meter, pv_no_telemetry);
+    }
+
+    let graph = builder.build(None)?;
+    // The component sum can't represent the group (only #3 reports), so the
+    // meters are the total; #4 is absent.
+    assert_eq!(
+        graph.pv_formula(None)?.to_string(),
+        "COALESCE(#1 + #2, COALESCE(#1, 0.0) + COALESCE(#2, 0.0))",
+    );
+    Ok(())
+}
+
+/// In a subtraction, a no-telemetry target drops out of the component-side
+/// terms, so the meter-minus-siblings difference is the primary source.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → MixedMeter:2 → {PV:3, PV:4 (no
+/// telemetry), Meter:5}`, plus `Meter:1 → Meter:6` to keep Meter:2 internal.
+#[test]
+fn test_no_telemetry_in_subtraction() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let mixed_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, mixed_meter);
+    let pv = builder.solar_inverter();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    let sub_meter = builder.meter();
+    builder.connect(mixed_meter, pv);
+    builder.connect(mixed_meter, pv_no_telemetry);
+    builder.connect(mixed_meter, sub_meter);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+    // Only #3 reports, so the exact component sum can't be primary: the
+    // difference #2 - #5 is, with #3 as the degraded fallback. #4 is absent.
+    assert_eq!(
+        graph.pv_formula(None)?.to_string(),
+        "COALESCE(#2 - #5, #3, 0.0)",
+    );
+    Ok(())
+}
+
+/// In a subtraction where every target lacks telemetry, no component reading
+/// backs the difference, so it falls back to `0.0` rather than going null
+/// when the parent meter is missing.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → MixedMeter:2 → {PV:3 (no telemetry),
+/// PV:4 (no telemetry), Meter:5}`, plus `Meter:1 → Meter:6` to keep Meter:2
+/// internal.
+#[test]
+fn test_all_no_telemetry_in_subtraction() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let mixed_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, mixed_meter);
+    let pv = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    let sub_meter = builder.meter();
+    builder.connect(mixed_meter, pv);
+    builder.connect(mixed_meter, pv_no_telemetry);
+    builder.connect(mixed_meter, sub_meter);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+    // Neither #3 nor #4 reports, so the difference #2 - #5 is the sole
+    // source, backed by 0.0 so the term stays total. #3 and #4 are absent.
+    assert_eq!(
+        graph.pv_formula(None)?.to_string(),
+        "COALESCE(#2 - #5, 0.0)",
+    );
+    Ok(())
+}
+
+/// Under `disable_fallback_components`, a no-telemetry target is dropped
+/// from the raw component sum.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → {PV:2, PV:3 (no telemetry)}`.
+#[test]
+fn test_no_telemetry_disable_fallback() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let meter = builder.meter();
+    builder.connect(grid, meter);
+    let pv = builder.solar_inverter();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    builder.connect(meter, pv);
+    builder.connect(meter, pv_no_telemetry);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .disable_fallback_components(true)
+            .build(),
+    ))?;
+    assert_eq!(graph.pv_formula(None)?.to_string(), "#2");
+    Ok(())
+}
+
+/// Under `disable_fallback_components`, when every target is dropped for lack
+/// of telemetry the term is kept total with a `0.0` (not an empty formula).
+///
+/// Topology (ids): `Grid:0 → Meter:1 → PV:2 (no telemetry)`.
+#[test]
+fn test_no_telemetry_disable_fallback_all_dropped() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let meter = builder.meter();
+    builder.connect(grid, meter);
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    builder.connect(meter, pv_no_telemetry);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .disable_fallback_components(true)
+            .build(),
+    ))?;
+    assert_eq!(graph.pv_formula(None)?.to_string(), "0.0");
+    Ok(())
+}
+
+/// A meter that provides no telemetry has no reading of its own: a component
+/// under it is measured directly, and drilling the meter itself never emits
+/// its `#id`.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → PVMeter:2 (no telemetry) → PV:3`,
+/// plus `Meter:1 → Meter:4` so Meter:2 isn't a sole-child fallback grid meter.
+#[test]
+fn test_no_telemetry_meter_dropped() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let pv_meter =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    builder.connect(grid_meter, pv_meter);
+    let pv = builder.solar_inverter();
+    builder.connect(pv_meter, pv);
+    let other_meter = builder.meter();
+    builder.connect(grid_meter, other_meter);
+
+    let graph = builder.build(None)?;
+
+    // The PV inverter #3 is under the no-telemetry meter #2, so it is measured
+    // directly; #2 never appears.
+    assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#3, 0.0)");
+
+    // Drilling the no-telemetry meter directly measures it by its children,
+    // never emitting its own #2.
+    let expr = aggregate(
+        &graph,
+        BTreeSet::from([pv_meter.component_id()]),
+        SourcePreference::MetersFirst,
+    )?;
+    assert_eq!(expr.to_string(), "COALESCE(#3, 0.0)");
+    Ok(())
+}
+
+/// A non-target sibling that provides no telemetry disqualifies the
+/// meter-minus-siblings subtraction (its share can't be subtracted), so the
+/// targets are measured directly instead.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → MixedMeter:2 → {PV:3, PV:4 (no
+/// telemetry), Meter:5}`, plus `Meter:1 → Meter:6`. Target only PV:3.
+#[test]
+fn test_no_telemetry_sibling_disqualifies_subtraction() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let mixed_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, mixed_meter);
+    let pv = builder.solar_inverter();
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    let sub_meter = builder.meter();
+    builder.connect(mixed_meter, pv);
+    builder.connect(mixed_meter, pv_no_telemetry);
+    builder.connect(mixed_meter, sub_meter);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+
+    // Targeting only PV:3: the non-target sibling PV:4 has no telemetry, so
+    // the subtraction #2 - ... can't isolate the group — PV:3 is measured
+    // directly, and neither #2, #4, nor #5 appear.
+    let expr = aggregate(
+        &graph,
+        BTreeSet::from([pv.component_id()]),
+        SourcePreference::ComponentsFirst,
+    )?;
+    assert_eq!(expr.to_string(), "COALESCE(#3, 0.0)");
+    Ok(())
+}
+
+/// A child meter that feeds a sibling without telemetry keeps its own term:
+/// the sibling has no reading to double count, and the feeder's reading is
+/// the only source for that line.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → Meter:2 → {Meter:3, Inverter:4 (PV,
+/// no telemetry)}`, plus `Meter:3 → Inverter:4`, and a load (Meter:5) under
+/// the grid meter.
+#[test]
+fn test_no_telemetry_sibling_keeps_feeder_meter() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let mixed_meter = builder.meter();
+    builder.connect(grid_meter, mixed_meter);
+    let feeder_meter = builder.meter();
+    builder.connect(mixed_meter, feeder_meter);
+    let pv_no_telemetry = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Pv),
+        OperationalMode::ControlOnly,
+    );
+    builder.connect(mixed_meter, pv_no_telemetry);
+    builder.connect(feeder_meter, pv_no_telemetry);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+    // The feeder meter (#3) stays in the fallback sum: dropping it would
+    // leave the line it measures with no source at all.
+    let expr = aggregate(
+        &graph,
+        BTreeSet::from([mixed_meter.component_id()]),
+        SourcePreference::MetersFirst,
+    )?;
+    assert_eq!(expr.to_string(), "COALESCE(#2, #3)");
+    Ok(())
+}
+
+/// A no-telemetry meter sibling has no reading to subtract, so its parent
+/// cannot form a substitution or subtraction group: the reporting targets
+/// are measured directly instead.
+///
+/// Topology (ids): `Grid:0 → GridMeter:1 → PVMeter:2 → {PV:3, Meter:4 (no
+/// telemetry) → PV:5}`.
+#[test]
+fn test_no_telemetry_meter_sibling_blocks_group() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let pv_meter = builder.meter();
+    builder.connect(grid_meter, pv_meter);
+    let pv = builder.solar_inverter();
+    builder.connect(pv_meter, pv);
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    builder.connect(pv_meter, silent);
+    let pv_below = builder.solar_inverter();
+    builder.connect(silent, pv_below);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.pv_formula(None)?.to_string(),
+        "COALESCE(#3, 0.0) + COALESCE(#5, 0.0)"
+    );
     Ok(())
 }
