@@ -102,12 +102,12 @@ where
     /// Returns the formula for a specific component by its ID.
     ///
     /// A component that provides no telemetry has no reading to emit, so its
-    /// formula is `0.0`.
+    /// formula is `None`.
     ///
     /// Returns an error when `component_id` is not in the graph.
     pub fn component_formula(&self, component_id: u64) -> Result<Formula, Error> {
         if !self.component(component_id)?.provides_telemetry() {
-            return Ok(Expr::number(0.0).into());
+            return Ok(Expr::None.into());
         }
         Ok(Expr::component(component_id).into())
     }
@@ -232,8 +232,8 @@ mod tests {
         Ok(())
     }
 
-    /// A component that provides no telemetry has no reading, so its formula is
-    /// `0.0` (`None` for the AC coalesce variant).
+    /// A component that provides no telemetry has no reading, so both formula
+    /// variants are `None`.
     #[test]
     fn test_component_formula_no_telemetry() -> Result<(), Error> {
         let mut builder = ComponentGraphBuilder::new();
@@ -251,11 +251,36 @@ mod tests {
         let graph = builder.build(None)?;
         let inv = inverter.component_id();
 
-        assert_eq!(graph.component_formula(inv)?.to_string(), "0.0");
+        assert_eq!(graph.component_formula(inv)?.to_string(), "None");
         assert_eq!(
             graph.component_ac_coalesce_formula(inv)?.to_string(),
             "None"
         );
+        Ok(())
+    }
+
+    /// The no-telemetry check has no category test, so a meter with no
+    /// telemetry gets `None` like any other component. The meter here is not
+    /// the grid meter, whose term is already null for its own reason.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 (no telemetry) → PV:3`.
+    #[test]
+    fn test_component_formula_no_telemetry_meter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        let silent_meter =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let pv = builder.solar_inverter();
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, silent_meter);
+        builder.connect(silent_meter, pv);
+
+        let graph = builder.build(None)?;
+        let id = silent_meter.component_id();
+
+        assert_eq!(graph.component_formula(id)?.to_string(), "None");
+        assert_eq!(graph.component_ac_coalesce_formula(id)?.to_string(), "None");
         Ok(())
     }
 

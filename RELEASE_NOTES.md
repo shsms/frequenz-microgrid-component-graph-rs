@@ -12,7 +12,7 @@
 
 - The `Node` trait has a new `operational_mode()` method. The default is `OperationalMode::Unspecified`, which is treated as providing telemetry, so existing `Node` implementations keep their behavior. A component whose mode provides no telemetry is not used as a measurement source in formulas. It is still used to classify the meter that measures it (e.g. as a PV meter or a CHP meter). A coalesce formula can be `None` when no source component provides telemetry.
 
-- For a component that provides no telemetry, `component_formula()` returns a `0.0` formula and `component_ac_coalesce_formula()` returns `None`.
+- For a component that provides no telemetry, `component_formula()` and `component_ac_coalesce_formula()` both return `None`. This holds for a meter too.
 
 ## Bug Fixes
 
