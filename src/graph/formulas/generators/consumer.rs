@@ -93,11 +93,12 @@ where
         Ok(Formula::new(expr.max(Expr::number(0.0))))
     }
 
-    /// The sum of the topmost reporting meters.
+    /// The sum of the topmost reporting meters, minus the component chains
+    /// those readings cover.
     fn build_without_grid_meter(&self) -> Result<Formula, Error> {
         let summed = meters::summed(self.graph)?;
 
-        let Some(expr) = summed
+        let Some(mut expr) = summed
             .iter()
             .copied()
             .map(Expr::component)
@@ -105,6 +106,17 @@ where
         else {
             return Ok(Formula::new(Expr::number(0.0)));
         };
+
+        // A summed meter reads everything below it, non-consumer chains
+        // included, so those have to come back out — the same subtraction
+        // the grid-meter shape makes against the grid reading. The sum only
+        // holds what flows through its own meters, so which chains it can
+        // give back depends on those meters; `subtraction_targets` decides.
+        let targets = chains::subtraction_targets(self.graph, Some(&summed))?;
+
+        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+            expr = expr - term;
+        }
 
         Ok(Formula::new(expr.max(Expr::number(0.0))))
     }

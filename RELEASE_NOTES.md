@@ -14,4 +14,6 @@
 
 ## Bug Fixes
 
+- The consumer formula counted battery, PV, CHP, EV charger, wind turbine and steam boiler chains as site consumption when the grid connection point has a direct child that is not a grid meter — an inverter wired straight to the grid, for example. Those chains are now subtracted, as they already were when only grid meters sit below the grid connection point. A chain fed from outside the summed meters stays counted, because the sum never added its power in the first place. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
+
 - The consumer formula subtracted part of a battery, PV, CHP, EV charger, wind turbine or steam boiler chain twice when that chain is fed from two places — through a meter of its own and directly from a second meter. The meter above the chain reads only the part flowing through it, but its reading was subtracted as a whole chain's, on top of the chain's own reading. Site consumption came out too low, often clamped to zero. Such a chain is now subtracted once, through one term that covers both feeds. When the chain has no reading of its own to give, the meter's reading stands in for the one feed it carries. When even the meter reports nothing, nothing is subtracted for that chain. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
