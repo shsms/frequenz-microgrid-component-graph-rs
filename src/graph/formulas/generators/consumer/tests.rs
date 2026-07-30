@@ -1625,3 +1625,34 @@ fn test_consumer_formula_no_grid_meter_keeps_an_uncovered_chain_under_a_replaced
 
     Ok(())
 }
+
+/// A grid meter that reports nothing leaves no reading to subtract from.
+/// `grid_formula` is `None` for this graph, and so is the consumer formula:
+/// taking the battery chain out of an absent reading would leave
+/// `-COALESCE(#2, #3, 0.0)`, a negated chain reported as site consumption.
+///
+/// Topology (ids): `Grid:0 → Meter:1 (no telemetry)`,
+/// `Meter:1 → {Meter:2 → BatteryInverter:3 → Battery:4, Meter:5}`.
+#[test]
+fn test_consumer_formula_without_a_grid_reading_is_none() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let battery_meter = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, battery_meter);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(grid_meter, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.grid_formula()?.to_string(), "None");
+    assert_eq!(graph.consumer_formula()?.to_string(), "None");
+
+    Ok(())
+}

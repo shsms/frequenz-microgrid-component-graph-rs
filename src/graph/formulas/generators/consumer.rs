@@ -81,9 +81,14 @@ where
     /// The grid reading, minus the component chains below it.
     ///
     /// The grid reading covers every feed the site has, so every chain in the
-    /// graph is inside it and can be subtracted.
+    /// graph is inside it and can be subtracted. A grid meter that reports
+    /// nothing gives no reading to subtract from, and then there is no
+    /// consumption to report either.
     fn build_with_grid_meter(&self) -> Result<Formula, Error> {
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
+        if matches!(expr, Expr::None) {
+            return Ok(Expr::None.into());
+        }
 
         let targets = chains::subtraction_targets(self.graph, None)?;
         for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
