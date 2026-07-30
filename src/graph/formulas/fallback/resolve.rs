@@ -67,9 +67,15 @@ fn drop_subsumed(points: &mut Vec<Measurement>, subsumed: &[u64]) {
 /// single meter is claimed merges silently; a subtraction with a claimed
 /// parent falls back to a standalone point). A claim is never released:
 /// [`drop_subsumed`] keeps the retracted points' nodes claimed.
+/// Meters in `off_limits` are barred from standing in for the targets they
+/// measure: a group whose parent meters include one of them resolves to its
+/// own nodes instead, as it would with no parent meter at all. A meter
+/// further up is not consulted — only what stands directly above the group
+/// can be substituted for it.
 pub(super) fn measurement_points<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: &BTreeSet<u64>,
+    off_limits: &BTreeSet<u64>,
 ) -> Result<Vec<Measurement>, Error> {
     let mut remaining = targets.clone();
     let mut points = Vec::new();
@@ -78,7 +84,7 @@ pub(super) fn measurement_points<N: Node, E: Edge>(
     // for why one result fits every seed.
     let mut groups = BTreeMap::new();
     while let Some(id) = remaining.pop_first() {
-        let group = match classify(graph, id, targets, &mut groups)? {
+        let group = match classify(graph, id, targets, &mut groups, off_limits)? {
             // A parent meter already claimed by an earlier point measures
             // more than this group, so a subtraction only applies while its
             // parent meters are all unclaimed. A group the meters measure
@@ -186,10 +192,17 @@ fn classify<N: Node, E: Edge>(
     seed: u64,
     targets: &BTreeSet<u64>,
     cache: &mut BTreeMap<BTreeSet<u64>, Option<Group>>,
+    off_limits: &BTreeSet<u64>,
 ) -> Result<Option<Group>, Error> {
     let Some(meters) = parent_meters(graph, seed)? else {
         return Ok(None);
     };
+    // An off-limits meter may not stand in for its children, for the same
+    // reason a grid meter may not: its reading is already spoken for
+    // elsewhere in the caller's formula. Measure the group directly instead.
+    if meters.iter().any(|meter| off_limits.contains(meter)) {
+        return Ok(None);
+    }
     if let Some(group) = cache.get(&meters) {
         return Ok(group.clone());
     }

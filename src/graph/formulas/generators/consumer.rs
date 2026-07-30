@@ -31,7 +31,7 @@ use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::{
         Formula,
-        fallback::{SourcePreference, aggregate_terms, is_grid_meter},
+        fallback::{SourcePreference, aggregate_terms, aggregate_terms_avoiding, is_grid_meter},
         generators::grid::GridFormulaBuilder,
     },
 };
@@ -114,7 +114,11 @@ where
         // give back depends on those meters; `subtraction_targets` decides.
         let targets = chains::subtraction_targets(self.graph, Some(&summed))?;
 
-        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+        // The summed meters are off limits as measurement sources: a term
+        // reading one of them would cancel it out of the sum.
+        for term in
+            aggregate_terms_avoiding(self.graph, targets, SourcePreference::MetersFirst, &summed)?
+        {
             expr = expr - term;
         }
 

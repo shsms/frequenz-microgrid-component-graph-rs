@@ -121,6 +121,31 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
     targets: BTreeSet<u64>,
     policy: SourcePreference,
 ) -> Result<Vec<Expr>, Error> {
+    aggregate_terms_avoiding(graph, targets, policy, &BTreeSet::new())
+}
+
+/// [`aggregate_terms`], with `off_limits` meters barred from standing in for
+/// the groups they measure.
+///
+/// A caller that subtracts these terms from a sum of meter readings cannot use
+/// a term that reads one of the summed meters: the subtraction would cancel
+/// that meter out of the sum and take with it whatever else the meter reads,
+/// the loads the graph does not model included. A group whose parent meters
+/// include such a meter is measured node by node instead, exactly as a group
+/// with no parent meter is — including the part that hurts: a node that
+/// reports nothing has no reading to contribute and leaves its share of the
+/// group unmeasured, where a parent meter would have covered it.
+///
+/// `off_limits` is honoured only while fallbacks are on. Without them every
+/// target is measured by its own reading, which names a meter only if the
+/// target is one; the current caller's targets and `off_limits` sets are
+/// disjoint, so the question does not arise.
+pub(crate) fn aggregate_terms_avoiding<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    targets: BTreeSet<u64>,
+    policy: SourcePreference,
+    off_limits: &BTreeSet<u64>,
+) -> Result<Vec<Expr>, Error> {
     if graph.config.disable_fallback_components {
         // Without fallback, each target is measured by its own reading; a target
         // that provides no telemetry has no reading to emit, so it is dropped.
@@ -135,7 +160,7 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
         }
         Ok(terms)
     } else {
-        measurement_points(graph, &targets)?
+        measurement_points(graph, &targets, off_limits)?
             .into_iter()
             .map(|point| match point {
                 Measurement::Single(id) => measure(graph, id, policy),

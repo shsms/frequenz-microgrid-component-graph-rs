@@ -1264,6 +1264,319 @@ fn test_consumer_formula_no_grid_meter_subtracts_mixed_meter_once() -> Result<()
     Ok(())
 }
 
+/// A chain measured through a summed meter is subtracted by its own
+/// reading. Meter:3 has a load of its own, so BatteryInverter:5 would
+/// resolve to `#3 - #7`; subtracting that would cancel Meter:3 out of the
+/// sum and drop its whole line, so the inverter's own reading stands in.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`,
+/// `Meter:3 → {BatteryInverter:5 → Battery:6, Meter:7}`.
+/// Meter:2 reports nothing, so the sum descends to Meter:3 and Meter:4,
+/// which are not grid meters.
+#[test]
+fn test_consumer_formula_no_grid_meter_subtracts_a_meter_measured_chain() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(feeder, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - COALESCE(#5, 0.0), 0.0)"
+    );
+
+    // Without fallbacks the term is the inverter's own reading to begin
+    // with, so there is nothing to stand in for.
+    let no_fallback = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .disable_fallback_components(true)
+            .build(),
+    ))?;
+    assert_eq!(
+        no_fallback.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - #5, 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A cancelling chain and a plain one are both subtracted, each from the
+/// source that suits it. The battery chain under Meter:3 would resolve to
+/// `#3 - #7`, so it falls back to its own reading; the PV chain under
+/// Meter:4 has its own meter and keeps it.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`,
+/// `Meter:3 → {BatteryInverter:5 → Battery:6, Meter:7}`,
+/// `Meter:4 → Meter:8 → PV:9`.
+/// Meter:2 reports nothing, so the sum descends to Meter:3 and Meter:4.
+#[test]
+fn test_consumer_formula_no_grid_meter_subtracts_a_cancelling_chain_and_a_plain_one()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let load = builder.meter();
+    let pv_meter = builder.meter();
+    let metered_pv = builder.solar_inverter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(feeder, load);
+    builder.connect(sibling, pv_meter);
+    builder.connect(pv_meter, metered_pv);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - COALESCE(#5, 0.0) - COALESCE(#8, #9, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A summed meter that measures nothing but chains is not substituted for
+/// them. Meter:3 covers exactly BatteryInverter:5 and PV:7, so it would
+/// normally stand in for both; using it would cancel Meter:3 out of the sum
+/// and drop the loads it reads that the graph does not model. Each chain is
+/// subtracted by its own reading instead.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`,
+/// `Meter:3 → {BatteryInverter:5 → Battery:6, PV:7}`.
+/// Meter:2 reports nothing, so the sum descends to Meter:3 and Meter:4.
+#[test]
+fn test_consumer_formula_no_grid_meter_subtracts_a_covered_group_by_its_own_readings()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let mixed_pv = builder.solar_inverter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(feeder, mixed_pv);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - COALESCE(#5, 0.0) - COALESCE(#7, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A chain component that reports nothing cannot be subtracted. Its meter is
+/// the only thing that reads it, and that meter is in the sum, so its power
+/// stays counted; the reporting chain next to it still comes out.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`,
+/// `Meter:3 → {BatteryInverter:5 (no telemetry) → Battery:6, PV:7, Meter:8}`.
+#[test]
+fn test_consumer_formula_no_grid_meter_keeps_a_chain_that_reports_nothing() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let inverter = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Battery),
+        OperationalMode::ControlOnly,
+    );
+    let battery = builder.battery();
+    let mixed_pv = builder.solar_inverter();
+    let load = builder.meter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(feeder, mixed_pv);
+    builder.connect(feeder, load);
+
+    let graph = builder.build(None)?;
+    // BatteryInverter:5 contributes a 0.0 term: there is no reading to take
+    // out, so its draw stays in Meter:3's reading.
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - 0.0 - COALESCE(#7, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// One off-limits parent meter is enough to refuse the group. PV:7 is fed by
+/// Meter:5, which is not summed, and by Meter:4, which is; measuring it as
+/// that pair minus their other children would cancel Meter:4 out of the sum.
+/// Its own reading is used instead.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`, `Meter:3 → {Meter:5, Meter:6}`,
+/// `Meter:5 → {PV:7, Meter:8}`, `Meter:4 → {PV:7, Meter:9}`.
+/// Meter:2 reports nothing, so the sum descends to Meter:3 and Meter:4.
+#[test]
+fn test_consumer_formula_no_grid_meter_refuses_a_partly_off_limits_diamond() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let nested = builder.meter();
+    let nested_load = builder.meter();
+    let shared_pv = builder.solar_inverter();
+    let load = builder.meter();
+    let sibling_load = builder.meter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, nested);
+    builder.connect(feeder, nested_load);
+    builder.connect(nested, shared_pv);
+    builder.connect(nested, load);
+    builder.connect(sibling, shared_pv);
+    builder.connect(sibling, sibling_load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - COALESCE(#7, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A chain fed both through its own meter and from elsewhere is subtracted
+/// once, by its own reading. Meter:5 only reads what reaches
+/// BatteryInverter:7 through it, so its reading is not the whole chain's;
+/// subtracting both would take that part out twice.
+///
+/// Topology (ids): `Grid:0 → {PV:1, Meter:2}`,
+/// `Meter:2 → {Meter:3, Meter:4}`, `Meter:3 → {Meter:5, Meter:6}`,
+/// `Meter:5 → BatteryInverter:7 → Battery:8`, `Meter:4 → {BatteryInverter:7,
+/// Meter:9}`.
+/// Meter:2 reports nothing, so the sum descends to Meter:3 and Meter:4.
+#[test]
+fn test_consumer_formula_no_grid_meter_subtracts_an_outside_fed_chain_once() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let pv = builder.solar_inverter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let battery_meter = builder.meter();
+    let load = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let sibling_load = builder.meter();
+
+    builder.connect(grid, pv);
+    builder.connect(grid, silent);
+    builder.connect(silent, feeder);
+    builder.connect(silent, sibling);
+    builder.connect(feeder, battery_meter);
+    builder.connect(feeder, load);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(sibling, inverter);
+    builder.connect(sibling, sibling_load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#3 + #4 - COALESCE(#7, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// When the sum does not hold the whole chain, the meter above it is the
+/// right term after all: it reads exactly the part the sum does hold.
+/// BatteryInverter:3 is also fed by the silent Meter:6, whose power the sum
+/// never added, so Meter:2 — not the inverter — is subtracted.
+///
+/// Topology (ids): `Grid:0 → {Meter:1, Meter:6 (no telemetry), PV:8}`,
+/// `Meter:1 → {Meter:2, Meter:5}`, `Meter:2 → BatteryInverter:3 → Battery:4`,
+/// `Meter:6 → {Meter:7, BatteryInverter:3}`.
+#[test]
+fn test_consumer_formula_no_grid_meter_subtracts_a_partly_held_chain_through_its_meter()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let feeder = builder.meter();
+    let battery_meter = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let load = builder.meter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let silent_load = builder.meter();
+    let pv = builder.solar_inverter();
+
+    builder.connect(grid, feeder);
+    builder.connect(feeder, battery_meter);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(feeder, load);
+    builder.connect(grid, silent);
+    builder.connect(silent, silent_load);
+    builder.connect(silent, inverter);
+    builder.connect(grid, pv);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 + #7 - #2, 0.0)"
+    );
+
+    Ok(())
+}
+
 /// A replacement chain the sum does not hold is dropped, not subtracted.
 /// Meter:4 is replaced — BatteryInverter:5 below it is also fed by Meter:2
 /// and must come out through its own reading — but its other chain,

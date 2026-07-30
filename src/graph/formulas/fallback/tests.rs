@@ -303,12 +303,20 @@ fn test_measurement_points() -> Result<(), Error> {
 
     // The metered inverter (2) resolves to its meter (1)...
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([metered.component_id()]))?,
+        super::resolve::measurement_points(
+            &graph,
+            &BTreeSet::from([metered.component_id()]),
+            &BTreeSet::new()
+        )?,
         vec![super::resolve::Measurement::Single(meter.component_id())],
     );
     // ...while the meterless inverter (4) is measured directly.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([meterless.component_id()]))?,
+        super::resolve::measurement_points(
+            &graph,
+            &BTreeSet::from([meterless.component_id()]),
+            &BTreeSet::new()
+        )?,
         vec![super::resolve::Measurement::Single(
             meterless.component_id()
         )],
@@ -340,7 +348,7 @@ fn test_aggregate_diamond() -> Result<(), Error> {
 
     // The two meters collapse into one diamond term over the inverter.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &targets)?,
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
         vec![super::resolve::Measurement::Diamond {
             components: vec![inverter.component_id()],
             meters: vec![m1.component_id(), m2.component_id()],
@@ -474,7 +482,7 @@ fn test_substitution_asymmetric_diamond_order_independent() -> Result<(), Error>
         let graph = builder.build(None)?;
         let targets = BTreeSet::from([a.component_id(), b.component_id()]);
         assert_eq!(
-            super::resolve::measurement_points(&graph, &targets)?,
+            super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
             vec![super::resolve::Measurement::Diamond {
                 components: vec![4, 5],
                 meters: vec![m_a.component_id(), m_b.component_id()],
@@ -530,8 +538,46 @@ fn test_substitution_rejects_parent_meter_as_sibling() -> Result<(), Error> {
     // group — Inverter:5's nested feed through Meter:4 still counts as
     // fed through Meter:2 — and the group is one point on that meter.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4, 5]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4, 5]), &BTreeSet::new())?,
         vec![super::resolve::Measurement::Single(2)],
+    );
+    Ok(())
+}
+
+/// An off-limits parent meter is not substituted for the group it measures:
+/// the targets resolve to their own points, as they would with no parent
+/// meter at all.
+#[test]
+fn test_measurement_points_off_limits_meter() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let mixed_meter = builder.meter();
+    builder.connect(grid_meter, mixed_meter);
+    let solar_inverter = builder.solar_inverter();
+    builder.connect(mixed_meter, solar_inverter);
+    let chp = builder.chp();
+    builder.connect(mixed_meter, chp);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+    let targets = BTreeSet::from([solar_inverter.component_id(), chp.component_id()]);
+
+    // Meter:2 measures exactly the pair, so it normally stands in for both.
+    assert_eq!(
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
+        vec![super::resolve::Measurement::Single(2)],
+    );
+
+    // Barred, it is not: each target becomes its own point.
+    assert_eq!(
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::from([2]))?,
+        vec![
+            super::resolve::Measurement::Single(3),
+            super::resolve::Measurement::Single(4)
+        ],
     );
     Ok(())
 }
@@ -614,7 +660,7 @@ fn test_aggregate_subtraction() -> Result<(), Error> {
 
     // The group collapses into one subtraction term over the mixed meter.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &targets)?,
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
         vec![super::resolve::Measurement::Subtraction {
             parent_meters: vec![mixed_meter.component_id()],
             subtracted: vec![sub_meter.component_id()],
@@ -690,7 +736,7 @@ fn test_aggregate_subtraction_diamond() -> Result<(), Error> {
     // One inverter behind the two parallel meters: the summed meter readings
     // minus the other inverter, with the inverter's own reading preferred.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &targets)?,
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
         vec![super::resolve::Measurement::Subtraction {
             parent_meters: vec![m_a.component_id(), m_b.component_id()],
             subtracted: vec![pv2.component_id()],
@@ -709,7 +755,7 @@ fn test_aggregate_subtraction_diamond() -> Result<(), Error> {
     // With both inverters targeted there is nothing to subtract, so it stays
     // a pure diamond.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([4, 5]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([4, 5]), &BTreeSet::new())?,
         vec![super::resolve::Measurement::Diamond {
             components: vec![4, 5],
             meters: vec![2, 3],
@@ -747,7 +793,7 @@ fn test_subtraction_diamond_subsumes_earlier_single() -> Result<(), Error> {
     // `pv2`'s feed from `m_b`). The group's subtraction then covers `pv1`
     // and must subsume that point, or its readings would be counted twice.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &targets)?,
+        super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
         vec![super::resolve::Measurement::Subtraction {
             parent_meters: vec![m_a.component_id(), m_b.component_id()],
             subtracted: vec![bat_inverter.component_id()],
@@ -1469,7 +1515,7 @@ fn test_pruned_empty_subtraction_keeps_shape() -> Result<(), Error> {
             .build(),
     ))?;
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([3]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([3]), &BTreeSet::new())?,
         vec![super::resolve::Measurement::Subtraction {
             parent_meters: vec![2],
             subtracted: vec![],
@@ -1514,14 +1560,14 @@ fn test_claim_semantics_meter_targets() -> Result<(), Error> {
     // by a point that measures more than the inverter's group — and the
     // seed falls back to a standalone point.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([2, 3]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([2, 3]), &BTreeSet::new())?,
         vec![
             super::resolve::Measurement::Single(2),
             super::resolve::Measurement::Single(3)
         ],
     );
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([2, 3, 4]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([2, 3, 4]), &BTreeSet::new())?,
         vec![
             super::resolve::Measurement::Single(2),
             super::resolve::Measurement::Single(3),
@@ -1533,7 +1579,11 @@ fn test_claim_semantics_meter_targets() -> Result<(), Error> {
     // resolves the group onto the already-claimed meter: the group merges
     // into the existing point and emits nothing new.
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([2, 3, 4, 5]))?,
+        super::resolve::measurement_points(
+            &graph,
+            &BTreeSet::from([2, 3, 4, 5]),
+            &BTreeSet::new()
+        )?,
         vec![super::resolve::Measurement::Single(2)],
     );
     Ok(())
@@ -1574,7 +1624,7 @@ fn test_subsumed_claim_stays_claimed() -> Result<(), Error> {
     // substitution onto it emits nothing — its flow is already inside
     // Single(2).
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4, 5]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4, 5]), &BTreeSet::new())?,
         vec![super::resolve::Measurement::Single(2)],
     );
     Ok(())
@@ -1606,7 +1656,7 @@ fn test_subtraction_rejects_target_meter_sibling() -> Result<(), Error> {
     let graph = builder.build(None)?;
 
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([3, 4]), &BTreeSet::new())?,
         vec![
             super::resolve::Measurement::Single(3),
             super::resolve::Measurement::Single(4)
@@ -1645,7 +1695,7 @@ fn test_no_group_across_overlapping_diamonds() -> Result<(), Error> {
     let graph = builder.build(None)?;
 
     assert_eq!(
-        super::resolve::measurement_points(&graph, &BTreeSet::from([5, 6]))?,
+        super::resolve::measurement_points(&graph, &BTreeSet::from([5, 6]), &BTreeSet::new())?,
         vec![
             super::resolve::Measurement::Single(5),
             super::resolve::Measurement::Single(6)
@@ -1697,7 +1747,7 @@ fn test_subtraction_diamond_subsume_order_independent() -> Result<(), Error> {
 
         let targets = BTreeSet::from([pv_x.component_id(), pv_shared.component_id()]);
         assert_eq!(
-            super::resolve::measurement_points(&graph, &targets)?,
+            super::resolve::measurement_points(&graph, &targets, &BTreeSet::new())?,
             vec![super::resolve::Measurement::Subtraction {
                 parent_meters: vec![m_a.component_id(), m_b.component_id()],
                 subtracted: vec![bat_inverter.component_id()],
