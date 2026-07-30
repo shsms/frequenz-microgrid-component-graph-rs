@@ -188,14 +188,11 @@ where
         // resolve to that meter once. Otherwise each sibling would subtract
         // the others as a meter-minus-siblings difference, and the meter
         // would be counted twice.
-        let mut targets = BTreeSet::new();
-        for component_id in non_consumer_components {
-            if is_grid_meter(self.graph, self.graph.component(component_id)?)? {
-                continue;
-            }
-            targets.insert(component_id);
-        }
-        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+        for term in aggregate_terms(
+            self.graph,
+            non_consumer_components,
+            SourcePreference::MetersFirst,
+        )? {
             expr = expr - term;
         }
 
