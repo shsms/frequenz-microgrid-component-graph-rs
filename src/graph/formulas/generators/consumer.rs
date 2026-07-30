@@ -85,7 +85,7 @@ where
     fn build_with_grid_meter(&self) -> Result<Formula, Error> {
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
 
-        let targets = chains::component_chains(self.graph)?;
+        let targets = chains::subtraction_targets(self.graph, None)?;
         for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
             expr = expr - term;
         }

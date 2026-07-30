@@ -24,7 +24,7 @@ use crate::{ComponentGraph, ComponentGraphConfig, Edge, Error, Node};
 /// components first, the meter-side term only fills in when the group's own
 /// readings are missing. With meters first, it is the primary source, so the
 /// phantom load is counted whenever the meter reports.
-pub(super) fn parent_meters<N: Node, E: Edge>(
+pub(crate) fn parent_meters<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
 ) -> Result<Option<BTreeSet<u64>>, Error> {
@@ -54,7 +54,7 @@ pub(super) fn parent_meters<N: Node, E: Edge>(
 /// `id`'s full throughput. A feed from outside the meters (another meter,
 /// the grid, or an unmodeled source) is not in those readings, so a sum or
 /// difference over them would miscount it.
-pub(super) fn reached_only_through<N: Node, E: Edge>(
+pub(crate) fn reached_only_through<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     meters: &BTreeSet<u64>,
@@ -91,7 +91,7 @@ fn reached_only_through_inner<N: Node, E: Edge>(
 /// Whether `id` reaches any member of `set` strictly below itself, following
 /// the feed lines downward. The search starts at the node itself, so it is
 /// excluded explicitly (`id` may be in `set`).
-pub(super) fn reaches_any_below<N: Node, E: Edge>(
+pub(crate) fn reaches_any_below<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     set: &BTreeSet<u64>,

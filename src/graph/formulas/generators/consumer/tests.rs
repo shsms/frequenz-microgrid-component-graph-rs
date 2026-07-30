@@ -750,3 +750,194 @@ fn test_consumer_formula_mixed_meter_with_component_submeter() -> Result<(), Err
 
     Ok(())
 }
+
+/// The same overlap under a grid meter. Meter:3 and Meter:4 both feed
+/// BatteryInverter:6, so neither reads the whole chain; the pair minus
+/// Meter:3's other child does.
+///
+/// Topology (ids): `Grid:0 → Meter:1`, `Meter:1 → {Meter:2, Meter:3}`,
+/// `Meter:2 → {Meter:4, Meter:5}`, `Meter:4 → BatteryInverter:6 →
+/// Battery:7`, `Meter:3 → {BatteryInverter:6, Meter:8}`.
+#[test]
+fn test_consumer_formula_with_grid_meter_subtracts_an_outside_fed_chain_once() -> Result<(), Error>
+{
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let feeder = builder.meter();
+    let sibling = builder.meter();
+    let battery_meter = builder.meter();
+    let load = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let sibling_load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, feeder);
+    builder.connect(grid_meter, sibling);
+    builder.connect(feeder, battery_meter);
+    builder.connect(feeder, load);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(sibling, inverter);
+    builder.connect(sibling, sibling_load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#3 + #4 - #8, #6, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// The chains under a replaced meter all become targets, not just the one
+/// the overlap was found through. Meter:2 also measures BatteryInverter:6,
+/// which has no second feed and would otherwise go unsubtracted.
+///
+/// Topology (ids): `Grid:0 → Meter:1`, `Meter:1 → {Meter:2, Meter:3}`,
+/// `Meter:2 → {BatteryInverter:4 → Battery:5, BatteryInverter:6 →
+/// Battery:7}`, `Meter:3 → {BatteryInverter:4, Meter:8}`.
+#[test]
+fn test_consumer_formula_with_grid_meter_subtracts_every_chain_under_a_replaced_meter()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let battery_meter = builder.meter();
+    let sibling = builder.meter();
+    let shared = builder.battery_inverter();
+    let shared_battery = builder.battery();
+    let own = builder.battery_inverter();
+    let own_battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, battery_meter);
+    builder.connect(grid_meter, sibling);
+    builder.connect(battery_meter, shared);
+    builder.connect(shared, shared_battery);
+    builder.connect(battery_meter, own);
+    builder.connect(own, own_battery);
+    builder.connect(sibling, shared);
+    builder.connect(sibling, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#2 + #3 - #8, COALESCE(#4, 0.0) + COALESCE(#6, 0.0)), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// Two independent overlaps are both resolved, not just the first.
+///
+/// Topology (ids): `Grid:0 → Meter:1`,
+/// `Meter:1 → {Meter:2, Meter:5, Meter:7, Meter:10}`,
+/// `Meter:2 → BatteryInverter:3 → Battery:4`, `Meter:5 → {BatteryInverter:3,
+/// Meter:6}`, `Meter:7 → BatteryInverter:8 → Battery:9`,
+/// `Meter:10 → {BatteryInverter:8, Meter:11}`.
+#[test]
+fn test_consumer_formula_with_grid_meter_resolves_every_overlap() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+
+    for _ in 0..2 {
+        let battery_meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        let sibling = builder.meter();
+        let load = builder.meter();
+        builder.connect(grid_meter, battery_meter);
+        builder.connect(battery_meter, inverter);
+        builder.connect(inverter, battery);
+        builder.connect(grid_meter, sibling);
+        builder.connect(sibling, inverter);
+        builder.connect(sibling, load);
+    }
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#2 + #5 - #6, #3, 0.0) - COALESCE(#7 + #10 - #11, #8, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A chain that reports nothing cannot replace the meter above it: the
+/// meter's reading is the only measurement left, so it stays the target.
+/// BatteryInverter:3 provides no telemetry, and no feed can stand in for
+/// it — Meter:1 is the grid meter — so its own term would be a plain 0.0.
+///
+/// Topology (ids): `Grid:0 → Meter:1`, `Meter:1 → {Meter:2,
+/// BatteryInverter:3, Meter:5}`, `Meter:2 → BatteryInverter:3 → Battery:4`.
+#[test]
+fn test_consumer_formula_with_grid_meter_keeps_the_meter_of_a_silent_chain() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let battery_meter = builder.meter();
+    let inverter = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Battery),
+        OperationalMode::ControlOnly,
+    );
+    let battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, battery_meter);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(grid_meter, inverter);
+    builder.connect(grid_meter, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#2, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A chain that is silent from its meter down cannot be subtracted at
+/// all: no reading can be built from any of it, so no term is emitted.
+/// Battery:5 still reports, but no term reaches its reading through the
+/// two silent components above it.
+///
+/// Topology (ids): `Grid:0 → Meter:1`, `Meter:1 → {Meter:2,
+/// BatteryInverter:4, Meter:6}`, `Meter:2 → Meter:3 (no telemetry) →
+/// BatteryInverter:4 (no telemetry) → Battery:5`.
+#[test]
+fn test_consumer_formula_with_grid_meter_emits_no_term_for_a_wholly_silent_chain()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let battery_meter = builder.meter();
+    let silent_meter =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let inverter = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Battery),
+        OperationalMode::ControlOnly,
+    );
+    let battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, battery_meter);
+    builder.connect(battery_meter, silent_meter);
+    builder.connect(silent_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(grid_meter, inverter);
+    builder.connect(grid_meter, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#1, 0.0)");
+
+    Ok(())
+}

@@ -53,7 +53,9 @@ use crate::{ComponentGraph, Edge, Error, Node};
 use super::expr::Expr;
 use emit::{diamond_term, measure, subtraction_term, sum};
 pub(super) use predicates::ids_with_telemetry;
-pub(crate) use predicates::is_grid_meter;
+pub(crate) use predicates::{
+    is_grid_meter, parent_meters, reached_only_through, reaches_any_below,
+};
 use resolve::{Measurement, measurement_points};
 
 /// How [`aggregate`] picks measurement sources.
@@ -148,4 +150,15 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
             })
             .collect()
     }
+}
+
+/// Whether `id`'s own measurement term is a plain `0.0`: neither it nor
+/// anything the term can fall back to reports. Such a term subtracts
+/// nothing. Parent meters standing in for `id` are not considered; that is
+/// [`parent_meters`]' question.
+pub(crate) fn measures_nothing<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+) -> Result<bool, Error> {
+    Ok(measure(graph, id, SourcePreference::MetersFirst)? == Expr::number(0.0))
 }
