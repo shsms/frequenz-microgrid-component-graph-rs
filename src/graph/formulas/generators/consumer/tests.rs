@@ -1656,3 +1656,37 @@ fn test_consumer_formula_without_a_grid_reading_is_none() -> Result<(), Error> {
 
     Ok(())
 }
+
+/// A silent grid meter next to a reporting one: the grid reading is the
+/// reporting meter's alone, so the battery chain behind the silent meter
+/// must not come out of it. Its power was never in `#1`; subtracting
+/// `COALESCE(#3, #4, 0.0)` would report a discharging battery as site
+/// consumption.
+///
+/// Topology (ids): `Grid:0 → {Meter:1, Meter:2 (no telemetry)}`,
+/// `Meter:2 → {Meter:3 → BatteryInverter:4 → Battery:5, Meter:6}`.
+#[test]
+fn test_consumer_formula_keeps_chains_behind_a_silent_grid_meter() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let battery_meter = builder.meter();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    let load = builder.meter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid, silent);
+    builder.connect(silent, battery_meter);
+    builder.connect(battery_meter, inverter);
+    builder.connect(inverter, battery);
+    builder.connect(silent, load);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.grid_formula()?.to_string(), "#1");
+    assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#1, 0.0)");
+
+    Ok(())
+}

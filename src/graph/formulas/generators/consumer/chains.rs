@@ -21,13 +21,13 @@ use crate::{
 /// exactly one target, so a caller subtracting their terms takes each chain
 /// out once.
 ///
-/// `summed` names the meters the measurement adds up, or is `None` when the
-/// measurement is one reading covering every feed the site has — the grid
-/// meter. A sum only holds what flows through its own meters, so a chain fed
-/// from elsewhere as well stays counted; see [`covered`].
+/// `summed` names the meters the measurement adds up — the reporting grid
+/// meters, or the topmost reporting meters. A sum only holds what flows
+/// through its own meters, so a chain fed from elsewhere as well stays
+/// counted; see [`covered`].
 pub(super) fn subtraction_targets<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
-    summed: Option<&BTreeSet<u64>>,
+    summed: &BTreeSet<u64>,
 ) -> Result<BTreeSet<u64>, Error> {
     let mut targets = covered(graph, component_chains_below(graph, graph.root_id)?, summed)?;
 
@@ -68,16 +68,12 @@ pub(super) fn subtraction_targets<N: Node, E: Edge>(
 /// meter outside the set, or the grid itself — carries power the sum never
 /// added, so taking its reading out would remove more than the sum holds.
 /// The same check leaves out a chain hanging somewhere else entirely, such as
-/// an inverter straight off the grid. `None` holds everything: the grid
-/// reading covers every feed.
+/// an inverter straight off the grid.
 fn covered<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     chains: BTreeSet<u64>,
-    summed: Option<&BTreeSet<u64>>,
+    summed: &BTreeSet<u64>,
 ) -> Result<BTreeSet<u64>, Error> {
-    let Some(summed) = summed else {
-        return Ok(chains);
-    };
     let mut held = BTreeSet::new();
     for id in chains {
         if reached_only_through(graph, id, summed)? {
@@ -131,11 +127,11 @@ fn enclosing_target<N: Node, E: Edge>(
 fn any_readable<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     chains: &BTreeSet<u64>,
-    summed: Option<&BTreeSet<u64>>,
+    summed: &BTreeSet<u64>,
 ) -> Result<bool, Error> {
     for &chain in chains {
-        let stands_in = parent_meters(graph, chain)?
-            .is_some_and(|meters| summed.is_none_or(|summed| meters.is_disjoint(summed)));
+        let stands_in =
+            parent_meters(graph, chain)?.is_some_and(|meters| meters.is_disjoint(summed));
         if stands_in || !measures_nothing(graph, chain)? {
             return Ok(true);
         }

@@ -9,8 +9,8 @@
 //!    residual, so power drawn by something the graph does not model still
 //!    counts. See [`phantom_loads`].
 //! 2. Otherwise, when every component directly under the grid is a grid meter,
-//!    the grid reading measures the site. See
-//!    [`ConsumerFormulaBuilder::build_with_grid_meter`].
+//!    the grid reading measures the site — the feeds the reporting grid
+//!    meters carry. See [`ConsumerFormulaBuilder::build_with_grid_meter`].
 //! 3. Otherwise, the topmost reporting meters ([`meters::summed`]) measure it
 //!    between them. See
 //!    [`ConsumerFormulaBuilder::build_without_grid_meter`].
@@ -26,7 +26,10 @@ mod phantom_loads;
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeSet;
+
 use super::super::expr::Expr;
+use crate::component_category::CategoryPredicates;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::{
@@ -78,19 +81,27 @@ where
         }
     }
 
-    /// The grid reading, minus the component chains below it.
+    /// The grid reading, minus the component chains it covers.
     ///
-    /// The grid reading covers every feed the site has, so every chain in the
-    /// graph is inside it and can be subtracted. A grid meter that reports
-    /// nothing gives no reading to subtract from, and then there is no
-    /// consumption to report either.
+    /// The grid reading is the reporting grid meters' sum: every feed those
+    /// meters carry is inside it, and a silent grid meter's feed is not.
+    /// Chains behind a silent grid meter are left alone — their power was
+    /// never in the reading, so subtracting them would take out what was
+    /// never put in. With no reading at all, there is no consumption to
+    /// report either.
     fn build_with_grid_meter(&self) -> Result<Formula, Error> {
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
         if matches!(expr, Expr::None) {
             return Ok(Expr::None.into());
         }
 
-        let targets = chains::subtraction_targets(self.graph, None)?;
+        let reporting = self
+            .graph
+            .successors(self.graph.root_id)?
+            .filter(|successor| successor.provides_telemetry())
+            .map(|successor| successor.component_id())
+            .collect::<BTreeSet<_>>();
+        let targets = chains::subtraction_targets(self.graph, &reporting)?;
         for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
             expr = expr - term;
         }
@@ -117,7 +128,7 @@ where
         // the grid-meter shape makes against the grid reading. The sum only
         // holds what flows through its own meters, so which chains it can
         // give back depends on those meters; `subtraction_targets` decides.
-        let targets = chains::subtraction_targets(self.graph, Some(&summed))?;
+        let targets = chains::subtraction_targets(self.graph, &summed)?;
 
         // The summed meters are off limits as measurement sources: a term
         // reading one of them would cancel it out of the sum.
