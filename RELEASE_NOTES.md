@@ -22,4 +22,6 @@
 
 - The consumer formula reported the site's battery, PV, CHP, EV charger, wind turbine and steam boiler chains, with the sign flipped, as consumption when the grid meter provides no telemetry. There is no grid reading to subtract them from in that case, so the formula is now `None`, as `grid_formula` already was. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
 
+- `battery_formula` and `battery_ac_coalesce_formula` treated a hybrid inverter feeding a selected battery as a battery-power source: with explicit battery ids, the hybrid's AC reading — battery power plus its PV production — was counted as battery power, while the same call without ids left it out. Both calls now leave hybrid inverters out on both paths, so the two entry points agree.
+
 - The consumer formula subtracted battery, PV, CHP, EV charger, wind turbine and steam boiler chains behind a grid meter that provides no telemetry, when another grid meter reports. A silent grid meter contributes nothing to the grid reading, so those chains were taken out of readings that never carried them — a discharging battery on the silent feed inflated site consumption. Chains behind a silent grid meter are no longer subtracted. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
