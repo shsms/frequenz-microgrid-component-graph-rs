@@ -101,23 +101,33 @@ where
             // Create a formula expression from the component.
             let mut expr = Expr::from(component);
 
-            // If there are siblings with the same successors as the component,
-            // then it is a diamond configuration, so we add those siblings to
-            // the expression.
-            let mut successors = BTreeMap::from_iter(
-                self.graph
-                    .successors(component_id)?
-                    .map(|s| (s.component_id(), s)),
-            );
-            for sibling in self.graph.siblings_from_successors(component_id)? {
-                // A sibling that provides no telemetry has no reading to add to
-                // the diamond sum; the shared successors are still merged, so
-                // the group's residual stays best-effort instead of going null.
-                if sibling.provides_telemetry() {
-                    expr = expr + sibling.into();
+            // Siblings sharing a successor form a diamond group measured by
+            // one term. The relation closes transitively: a bridge meter
+            // that shares one successor with this meter and another with a
+            // third meter pulls the third in too. Shared successors make
+            // the lines inseparable, so only the whole group's residual is
+            // well-defined — and each shared successor may be subtracted
+            // only once.
+            let mut group = BTreeSet::from([component_id]);
+            let mut queue = vec![component_id];
+            while let Some(member) = queue.pop() {
+                for sibling in self.graph.siblings_from_successors(member)? {
+                    if group.insert(sibling.component_id()) {
+                        // A member that provides no telemetry has no reading
+                        // to add to the diamond sum; its successors are
+                        // still merged, so the group's residual stays
+                        // best-effort instead of going null.
+                        if sibling.provides_telemetry() {
+                            expr = expr + sibling.into();
+                        }
+                        self.unvisited_meters.remove(&sibling.component_id());
+                        queue.push(sibling.component_id());
+                    }
                 }
-                self.unvisited_meters.remove(&sibling.component_id());
-                for successor in self.graph.successors(sibling.component_id())? {
+            }
+            let mut successors = BTreeMap::new();
+            for &member in &group {
+                for successor in self.graph.successors(member)? {
                     successors.insert(successor.component_id(), successor);
                 }
             }

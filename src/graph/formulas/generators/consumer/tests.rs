@@ -537,6 +537,78 @@ fn test_consumer_formula_phantom_loads_no_telemetry_diamond_sibling() -> Result<
     Ok(())
 }
 
+/// A partial diamond closes transitively: Meter:2 bridges Meter:1 and
+/// Meter:3 by sharing one child with each, so all three form one group.
+/// Splitting them would add the bridge's reading to two groups and
+/// subtract each shared child twice.
+///
+/// Topology (ids): `Grid:0 → {Meter:1 → Meter:4, Meter:2 → {Meter:4,
+/// Meter:5}, Meter:3 → Meter:5}`.
+#[test]
+fn test_consumer_formula_phantom_loads_merges_a_bridged_diamond() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let left = builder.meter();
+    let bridge = builder.meter();
+    let right = builder.meter();
+    let shared_left = builder.meter();
+    let shared_right = builder.meter();
+    builder.connect(grid, left);
+    builder.connect(grid, bridge);
+    builder.connect(grid, right);
+    builder.connect(left, shared_left);
+    builder.connect(bridge, shared_left);
+    builder.connect(bridge, shared_right);
+    builder.connect(right, shared_right);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .include_phantom_loads_in_consumer_formula(true)
+            .build(),
+    ))?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 + #2 + #3 - #4 - #5, 0.0) + MAX(#4, 0.0) + MAX(#5, 0.0)",
+    );
+    Ok(())
+}
+
+/// The bridged diamond with the bridge silent: its reading is left out
+/// of the group sum, but the group still merges, so each shared child is
+/// subtracted once — not once per line it feeds.
+///
+/// Topology (ids): as the bridged-diamond test, Meter:2 without
+/// telemetry.
+#[test]
+fn test_consumer_formula_phantom_loads_merges_a_silent_bridged_diamond() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let left = builder.meter();
+    let bridge =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    let right = builder.meter();
+    let shared_left = builder.meter();
+    let shared_right = builder.meter();
+    builder.connect(grid, left);
+    builder.connect(grid, bridge);
+    builder.connect(grid, right);
+    builder.connect(left, shared_left);
+    builder.connect(bridge, shared_left);
+    builder.connect(bridge, shared_right);
+    builder.connect(right, shared_right);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .include_phantom_loads_in_consumer_formula(true)
+            .build(),
+    ))?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 + #3 - #4 - #5, 0.0) + MAX(#4, 0.0) + MAX(#5, 0.0)",
+    );
+    Ok(())
+}
+
 /// A reporting meter whose only child is a no-telemetry meter resolves
 /// through it: the grandchild reading backs the meter's own reading in
 /// the subtracted term, instead of a 0.0 that would hide it.
