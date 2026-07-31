@@ -942,6 +942,75 @@ fn test_consumer_formula_with_grid_meter_emits_no_term_for_a_wholly_silent_chain
     Ok(())
 }
 
+/// A chain fed through two parallel meters, one silent: the silent
+/// meter's term would be a plain 0.0, and the reporting meter reads only
+/// its own feed. The chain's own reading covers both feeds, so it is the
+/// term — the same replacement the wholly-silent case makes, in sibling
+/// form.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → {Meter:2, Meter:3 (no
+/// telemetry)}`, both → `PV:4`.
+#[test]
+fn test_consumer_formula_with_grid_meter_subtracts_a_silently_fed_chain_by_its_reading()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let pv_meter = builder.meter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let pv = builder.solar_inverter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, pv_meter);
+    builder.connect(grid_meter, silent);
+    builder.connect(pv_meter, pv);
+    builder.connect(silent, pv);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#4, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
+/// A silent parallel meter that also feeds a chain of its own is still
+/// replaced: its reading covers nothing, so at best it reaches the
+/// chains only it feeds. Both chains come out through their own
+/// readings; the shared one covers both feeds.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → {Meter:2, Meter:3 (no
+/// telemetry)}`, `Meter:2 → PV:4`, `Meter:3 → {PV:4, PV:5}`.
+#[test]
+fn test_consumer_formula_with_grid_meter_replaces_a_silent_meter_that_still_reads_a_chain()
+-> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    let pv_meter = builder.meter();
+    let silent =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    let shared_pv = builder.solar_inverter();
+    let own_pv = builder.solar_inverter();
+
+    builder.connect(grid, grid_meter);
+    builder.connect(grid_meter, pv_meter);
+    builder.connect(grid_meter, silent);
+    builder.connect(pv_meter, shared_pv);
+    builder.connect(silent, shared_pv);
+    builder.connect(silent, own_pv);
+
+    let graph = builder.build(None)?;
+    assert_eq!(
+        graph.consumer_formula()?.to_string(),
+        "MAX(#1 - COALESCE(#4, 0.0) - COALESCE(#5, 0.0), 0.0)"
+    );
+
+    Ok(())
+}
+
 /// Without a grid meter, a feeder meter's reading covers the whole
 /// feeder, so a battery chain under it is subtracted back out. The
 /// formula matches the shape the grid-meter path produces.

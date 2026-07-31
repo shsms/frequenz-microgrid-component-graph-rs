@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::component_category::CategoryPredicates;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::fallback::{
@@ -30,6 +31,25 @@ pub(super) fn subtraction_targets<N: Node, E: Edge>(
     summed: &BTreeSet<u64>,
 ) -> Result<BTreeSet<u64>, Error> {
     let mut targets = covered(graph, component_chains_below(graph, graph.root_id)?, summed)?;
+
+    // A target whose own term collapses to 0.0 subtracts nothing, and a
+    // silent meter's term can never cover its feed — at best it reaches
+    // the chains only it feeds. Replace either with the chains it covers,
+    // while any of them has a reading: those chains carry the flow the
+    // target's term misses. The loop below then folds any parallel
+    // target that feeds the same chains into the replacements.
+    for target in targets.clone() {
+        let component = graph.component(target)?;
+        if measures_nothing(graph, target)?
+            || (component.is_meter() && !component.provides_telemetry())
+        {
+            let replacements = covered(graph, component_chains_below(graph, target)?, summed)?;
+            if any_readable(graph, &replacements, summed)? {
+                targets.remove(&target);
+                targets.extend(replacements);
+            }
+        }
+    }
 
     // The search takes the topmost chain on each path, which leaves one
     // overlap: a chain fed from two places is reached on the path its own
