@@ -8,9 +8,9 @@
 //! 1. With phantom loads configured in, every reporting meter contributes its
 //!    residual, so power drawn by something the graph does not model still
 //!    counts. See [`phantom_loads`].
-//! 2. Otherwise, when every component directly under the grid is a grid meter,
-//!    the grid reading measures the site — the feeds the reporting grid
-//!    meters carry. See [`ConsumerFormulaBuilder::build_with_grid_meter`].
+//! 2. Otherwise, when every component directly under the grid is a grid meter
+//!    that reports, the grid reading measures the site. See
+//!    [`ConsumerFormulaBuilder::build_with_grid_meter`].
 //! 3. Otherwise, the topmost reporting meters ([`meters::summed`]) measure it
 //!    between them. See
 //!    [`ConsumerFormulaBuilder::build_without_grid_meter`].
@@ -73,7 +73,7 @@ where
 
         if grid_successors
             .iter()
-            .all(|s| is_grid_meter(self.graph, s).unwrap_or(false))
+            .all(|s| is_grid_meter(self.graph, s).unwrap_or(false) && s.provides_telemetry())
         {
             self.build_with_grid_meter()
         } else {
@@ -83,25 +83,18 @@ where
 
     /// The grid reading, minus the component chains it covers.
     ///
-    /// The grid reading is the reporting grid meters' sum: every feed those
-    /// meters carry is inside it, and a silent grid meter's feed is not.
-    /// Chains behind a silent grid meter are left alone — their power was
-    /// never in the reading, so subtracting them would take out what was
-    /// never put in. With no reading at all, there is no consumption to
-    /// report either.
+    /// Every grid meter reports here — a graph with a silent one takes the
+    /// summed-meters shape instead — so the grid reading covers every feed
+    /// and every chain can be subtracted.
     fn build_with_grid_meter(&self) -> Result<Formula, Error> {
         let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
-        if matches!(expr, Expr::None) {
-            return Ok(Expr::None.into());
-        }
 
-        let reporting = self
+        let meters = self
             .graph
             .successors(self.graph.root_id)?
-            .filter(|successor| successor.provides_telemetry())
             .map(|successor| successor.component_id())
             .collect::<BTreeSet<_>>();
-        let targets = chains::subtraction_targets(self.graph, &reporting)?;
+        let targets = chains::subtraction_targets(self.graph, &meters)?;
         for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
             expr = expr - term;
         }
@@ -120,7 +113,15 @@ where
             .map(Expr::component)
             .reduce(|sum, component| sum + component)
         else {
-            return Ok(Formula::new(Expr::number(0.0)));
+            // Nothing to sum. A graph with no reading at all — the grid
+            // formula is null too — has no answer; a graph that is merely
+            // meterless consumes nothing it can see, and 0.0 is right.
+            let grid = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
+            return Ok(if matches!(grid, Expr::None) {
+                Expr::None.into()
+            } else {
+                Formula::new(Expr::number(0.0))
+            });
         };
 
         // A summed meter reads everything below it, non-consumer chains

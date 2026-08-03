@@ -1767,15 +1767,16 @@ fn test_consumer_formula_no_grid_meter_keeps_an_uncovered_chain_under_a_replaced
     Ok(())
 }
 
-/// A grid meter that reports nothing leaves no reading to subtract from.
-/// `grid_formula` is `None` for this graph, and so is the consumer formula:
-/// taking the battery chain out of an absent reading would leave
-/// `-COALESCE(#2, #3, 0.0)`, a negated chain reported as site consumption.
+/// A grid meter that reports nothing leaves no reading to subtract from,
+/// so the graph takes the summed-meters shape: the topmost reporting
+/// meters below the silent grid meter measure the site. The battery
+/// chain is not covered by the sum and stays out; the grid formula
+/// descends to the same readings.
 ///
 /// Topology (ids): `Grid:0 → Meter:1 (no telemetry)`,
 /// `Meter:1 → {Meter:2 → BatteryInverter:3 → Battery:4, Meter:5}`.
 #[test]
-fn test_consumer_formula_without_a_grid_reading_is_none() -> Result<(), Error> {
+fn test_consumer_formula_sums_reporting_meters_under_a_silent_grid_meter() -> Result<(), Error> {
     let mut builder = ComponentGraphBuilder::new();
     let grid = builder.grid();
     let grid_meter =
@@ -1792,22 +1793,26 @@ fn test_consumer_formula_without_a_grid_reading_is_none() -> Result<(), Error> {
     builder.connect(grid_meter, load);
 
     let graph = builder.build(None)?;
-    assert_eq!(graph.grid_formula()?.to_string(), "None");
-    assert_eq!(graph.consumer_formula()?.to_string(), "None");
+    assert_eq!(
+        graph.grid_formula()?.to_string(),
+        "#5 + COALESCE(#2, #3, 0.0)"
+    );
+    assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#5, 0.0)");
 
     Ok(())
 }
 
-/// A silent grid meter next to a reporting one: the grid reading is the
-/// reporting meter's alone, so the battery chain behind the silent meter
-/// must not come out of it. Its power was never in `#1`; subtracting
+/// A silent grid meter next to a reporting one: the graph takes the
+/// summed-meters shape, and the silent meter's line is measured by its
+/// reporting children. The load behind it counts; the battery chain is
+/// not covered by the sum and must not come out of it — subtracting
 /// `COALESCE(#3, #4, 0.0)` would report a discharging battery as site
 /// consumption.
 ///
 /// Topology (ids): `Grid:0 → {Meter:1, Meter:2 (no telemetry)}`,
 /// `Meter:2 → {Meter:3 → BatteryInverter:4 → Battery:5, Meter:6}`.
 #[test]
-fn test_consumer_formula_keeps_chains_behind_a_silent_grid_meter() -> Result<(), Error> {
+fn test_consumer_formula_descends_past_a_silent_grid_meter() -> Result<(), Error> {
     let mut builder = ComponentGraphBuilder::new();
     let grid = builder.grid();
     let grid_meter = builder.meter();
@@ -1826,8 +1831,59 @@ fn test_consumer_formula_keeps_chains_behind_a_silent_grid_meter() -> Result<(),
     builder.connect(silent, load);
 
     let graph = builder.build(None)?;
-    assert_eq!(graph.grid_formula()?.to_string(), "#1");
-    assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#1, 0.0)");
+    assert_eq!(
+        graph.grid_formula()?.to_string(),
+        "#1 + #6 + COALESCE(#3, #4, 0.0)"
+    );
+    assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#1 + #6, 0.0)");
+
+    Ok(())
+}
+
+/// An AC path that is silent to the leaves has no reading, even when a
+/// DC-side battery reports: no emitted term could use that reading, so
+/// both formulas answer `None` instead of a fabricated 0.0.
+///
+/// Topology (ids): `Grid:0 → Meter:1 (no telemetry) → Meter:2 (no
+/// telemetry) → BatteryInverter:3 (no telemetry) → Battery:4`.
+#[test]
+fn test_consumer_formula_is_none_when_the_ac_path_is_silent() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let gm = builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    let bm = builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    let inv = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Battery),
+        OperationalMode::ControlOnly,
+    );
+    let bat = builder.battery();
+    builder.connect(grid, gm);
+    builder.connect(gm, bm);
+    builder.connect(bm, inv);
+    builder.connect(inv, bat);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.grid_formula()?.to_string(), "None");
+    assert_eq!(graph.consumer_formula()?.to_string(), "None");
+
+    Ok(())
+}
+
+/// A silent grid meter with nothing below it gives the graph no reading
+/// at all: the consumer answers `None` like the grid formula, not a
+/// fabricated zero. A genuinely meterless graph still answers 0.0.
+///
+/// Topology (ids): `Grid:0 → Meter:1 (no telemetry)`.
+#[test]
+fn test_consumer_formula_is_none_when_nothing_reports() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let gm = builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+    builder.connect(grid, gm);
+
+    let graph = builder.build(None)?;
+    assert_eq!(graph.grid_formula()?.to_string(), "None");
+    assert_eq!(graph.consumer_formula()?.to_string(), "None");
 
     Ok(())
 }

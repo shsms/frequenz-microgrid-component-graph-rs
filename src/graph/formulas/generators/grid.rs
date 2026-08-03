@@ -314,9 +314,11 @@ mod tests {
         Ok(())
     }
 
-    /// A grid meter that provides no telemetry is never backed by its
-    /// children (they do not carry the site's unmodeled load), so its term
-    /// is null rather than a wrong children sum.
+    /// A grid meter that provides no telemetry resolves through its
+    /// reporting children — the same descent the consumer's summed-meters
+    /// shape makes. The reading misses unmodeled loads on the silent
+    /// segment and anything fed around the silent meter; the silent
+    /// meter's own id never appears.
     ///
     /// Topology (ids): `Grid:0 → GridMeter:1 (no telemetry) → Meter:2`.
     #[test]
@@ -330,7 +332,7 @@ mod tests {
         builder.connect(grid_meter, meter);
 
         let graph = builder.build(None)?;
-        assert_eq!(graph.grid_formula()?.to_string(), "None");
+        assert_eq!(graph.grid_formula()?.to_string(), "#2");
         Ok(())
     }
 
@@ -419,6 +421,56 @@ mod tests {
             graph.grid_formula()?.to_string(),
             "COALESCE(#2 + #1, #3, COALESCE(#2, 0.0) + COALESCE(#1, 0.0)) + #5"
         );
+
+        Ok(())
+    }
+    /// A silent link in a grid-meter chain does not cut the fallback
+    /// ladder: Meter:2 reports nothing, but Meter:3 below it covers the
+    /// same line, so it backs the top reading. The silent meter's own id
+    /// never appears. A silent grid meter with no child read through it
+    /// alone still yields `None`; one with reporting children resolves
+    /// through them, as the reporting ladder already does at runtime.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 (no telemetry) →
+    /// Meter:3 → {battery chain 4-6, PV chain 7-8}`.
+    #[test]
+    fn test_grid_formula_drills_through_a_silent_chain_link() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let m1 = builder.meter();
+        let m2 =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let m3 = builder.meter();
+        builder.connect(grid, m1);
+        builder.connect(m1, m2);
+        builder.connect(m2, m3);
+        let bat = builder.meter_bat_chain(1, 1);
+        let pv = builder.meter_pv_chain(1);
+        builder.connect(m3, bat);
+        builder.connect(m3, pv);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "COALESCE(#1, #3)");
+
+        Ok(())
+    }
+    /// A reporting grid meter over a silent dead-end meter stays bare:
+    /// nothing below it can back the reading, and a 0.0 fallback would
+    /// assert one when the meter drops offline.
+    ///
+    /// Topology (ids): `Grid:0 → GridMeter:1 → Meter:2 (no telemetry)`.
+    #[test]
+    fn test_grid_formula_keeps_a_grid_meter_bare_over_a_silent_dead_end() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        let silent =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, silent);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "#1");
 
         Ok(())
     }
