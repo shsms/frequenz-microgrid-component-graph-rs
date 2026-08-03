@@ -177,7 +177,7 @@ fn best_effort_sum(ids: &[u64]) -> Option<Expr> {
 /// - components primary: the component readings, then straight to that
 ///   best-effort sum — the exact meter sum it would otherwise carry in between
 ///   is dominated by the best-effort one, so it is omitted.
-pub(super) fn diamond_term<N: Node, E: Edge>(
+pub(crate) fn diamond_term<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     components: &[u64],
     meters: &[u64],
@@ -187,7 +187,13 @@ pub(super) fn diamond_term<N: Node, E: Edge>(
     if components.is_empty() {
         return Err(empty());
     }
-    let meter_best = best_effort_sum(meters).ok_or_else(empty)?;
+    // A meter that provides no telemetry never resolves: the exact meter
+    // sum is dead with it in, and its best-effort term is a constant 0.
+    // Both are left out of the formula — that is what the operational
+    // mode is for. Only a fully reporting meter set keeps its exact sum.
+    let reporting = ids_with_telemetry(graph, meters.iter().copied())?;
+    let meters_report = reporting.len() == meters.len();
+    let meter_best = best_effort_sum(&reporting);
     // A component that provides no telemetry has no reading; the meter
     // readings still measure it, so it is dropped only from the
     // component-side term. The component readings can stand in for the meter
@@ -198,14 +204,22 @@ pub(super) fn diamond_term<N: Node, E: Edge>(
         ids_with_telemetry(graph, components.iter().copied())?.len() == components.len();
     if all_report {
         let component_sum = exact_sum(components).ok_or_else(empty)?;
-        Ok(if policy.meters_first() {
-            let meter_sum = exact_sum(meters).ok_or_else(empty)?;
-            meter_sum.coalesce(component_sum).coalesce(meter_best)
-        } else {
-            component_sum.coalesce(meter_best)
+        Ok(match meter_best {
+            Some(meter_best) if policy.meters_first() && meters_report => {
+                let meter_sum = exact_sum(meters).ok_or_else(empty)?;
+                meter_sum.coalesce(component_sum).coalesce(meter_best)
+            }
+            Some(meter_best) => component_sum.coalesce(meter_best),
+            None => component_sum,
         })
+    } else if meters_report {
+        Ok(exact_sum(meters)
+            .ok_or_else(empty)?
+            .coalesce(meter_best.ok_or_else(empty)?))
     } else {
-        Ok(exact_sum(meters).ok_or_else(empty)?.coalesce(meter_best))
+        // Neither a full meter sum nor a full component sum exists; the
+        // reporting meters' best effort is the most the formula can say.
+        Ok(meter_best.unwrap_or(Expr::None))
     }
 }
 

@@ -51,7 +51,8 @@ use std::collections::BTreeSet;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 use super::expr::Expr;
-use emit::{diamond_term, measure, subtraction_term, sum};
+pub(crate) use emit::diamond_term;
+use emit::{measure, subtraction_term, sum};
 pub(super) use predicates::ids_with_telemetry;
 pub(crate) use predicates::{
     is_grid_meter, parent_meters, reached_only_through, reaches_any_below,

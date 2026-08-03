@@ -5,12 +5,13 @@
 
 use std::collections::BTreeSet;
 
+use crate::component_category::CategoryPredicates;
 use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::{
         Formula,
         expr::Expr,
-        fallback::{SourcePreference, aggregate},
+        fallback::{SourcePreference, aggregate, diamond_term, is_grid_meter},
     },
 };
 
@@ -36,22 +37,121 @@ where
     /// The grid formula is the sum of all components connected to the grid.
     /// This formula can be used for calculating power or current metrics at the
     /// grid connection point.
+    ///
+    /// Feeds that share components below them — parallel meters over one
+    /// chain — are measured as one diamond: the meter readings sum to the
+    /// group's throughput, backed by the shared components' own readings.
+    /// A per-feed term would have no backing, and a feed whose meter
+    /// reports nothing would count as zero flow.
     pub fn build(self) -> Result<Formula, Error> {
         let mut expr = None;
-        for comp in self.graph.successors(self.graph.root_id)? {
-            let comp = aggregate(
-                self.graph,
-                BTreeSet::from([comp.component_id()]),
-                SourcePreference::MetersFirstWithChains,
-            )?;
+        for group in self.feed_groups()? {
+            let term = match group.as_slice() {
+                [feed] => aggregate(
+                    self.graph,
+                    BTreeSet::from([*feed]),
+                    SourcePreference::MetersFirstWithChains,
+                )?,
+                meters => {
+                    let mut components = BTreeSet::new();
+                    for &meter in meters {
+                        components.extend(self.graph.successors(meter)?.map(|s| s.component_id()));
+                    }
+                    let components: Vec<u64> = components.into_iter().collect();
+                    diamond_term(
+                        self.graph,
+                        &components,
+                        meters,
+                        SourcePreference::MetersFirstWithChains,
+                    )?
+                }
+            };
             expr = match expr {
-                None => Some(comp),
-                Some(e) => Some(comp + e),
+                None => Some(term),
+                Some(e) => Some(term + e),
             };
         }
         Ok(expr
             .map(Formula::new)
             .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
+    }
+
+    /// The grid's feeds, with parallel feeds over shared components
+    /// grouped. Feeds whose subtrees overlap belong together, closed
+    /// transitively. A group is measured as a diamond only when every
+    /// member is a meter, none is a grid meter — a grid meter also
+    /// carries the site's unmodeled load, which no component sum accounts
+    /// for — and no member feeds another (a serial pair is not a
+    /// diamond). Any other overlapping group falls back to per-feed
+    /// terms: the members come back as singletons.
+    fn feed_groups(&self) -> Result<Vec<Vec<u64>>, Error> {
+        let feeds: Vec<&N> = self.graph.successors(self.graph.root_id)?.collect();
+        let mut reaches = Vec::new();
+        for feed in &feeds {
+            reaches.push(self.graph.find_all(
+                feed.component_id(),
+                |_| true,
+                petgraph::Direction::Outgoing,
+                true,
+            )?);
+        }
+
+        // Merge overlapping subtrees into groups of feed indices, keeping
+        // first-seen order. A feed overlapping several earlier groups
+        // bridges them into one.
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for index in 0..feeds.len() {
+            let mut target: Option<usize> = None;
+            let mut position = 0;
+            while position < groups.len() {
+                let overlaps = groups[position]
+                    .iter()
+                    .any(|&member| !reaches[member].is_disjoint(&reaches[index]));
+                match (overlaps, target) {
+                    (true, None) => {
+                        target = Some(position);
+                        position += 1;
+                    }
+                    (true, Some(first)) => {
+                        let bridged = groups.remove(position);
+                        groups[first].extend(bridged);
+                    }
+                    (false, _) => position += 1,
+                }
+            }
+            match target {
+                Some(first) => groups[first].push(index),
+                None => groups.push(vec![index]),
+            }
+        }
+
+        let mut result = Vec::new();
+        for group in groups {
+            let diamond = group.len() > 1
+                && group.iter().try_fold(true, |ok, &member| {
+                    Ok::<bool, Error>(
+                        ok && feeds[member].is_meter()
+                            && !is_grid_meter(self.graph, feeds[member])?
+                            && group.iter().all(|&other| {
+                                other == member
+                                    || !reaches[member].contains(&feeds[other].component_id())
+                            }),
+                    )
+                })?;
+            if diamond {
+                result.push(
+                    group
+                        .iter()
+                        .map(|&member| feeds[member].component_id())
+                        .collect(),
+                );
+            } else {
+                for &member in &group {
+                    result.push(vec![feeds[member].component_id()]);
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -231,6 +331,95 @@ mod tests {
 
         let graph = builder.build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "None");
+        Ok(())
+    }
+
+    /// Two parallel meters over one battery chain, one silent: the pair
+    /// is one diamond. A meter sum with the silent Meter:1 in it could
+    /// never resolve, so it is left out: the inverter's reading, which
+    /// covers both feeds exactly, is primary, and the reporting meter is
+    /// the best-effort backup. A per-feed term would count the silent
+    /// feed as a hard 0.0.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1 (no telemetry), Meter:2}`,
+    /// both → `BatteryInverter:3 → Battery:4`.
+    #[test]
+    fn test_grid_formula_backs_a_diamond_with_a_silent_leg() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let silent =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let reporting = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(grid, silent);
+        builder.connect(grid, reporting);
+        builder.connect(silent, inverter);
+        builder.connect(reporting, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "COALESCE(#3, #2, 0.0)");
+
+        Ok(())
+    }
+
+    /// The same diamond with both meters silent: nothing meter-side can
+    /// ever resolve, so the formula is the inverter's reading alone —
+    /// null when it is offline, never a fabricated zero.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2} (both no
+    /// telemetry)`, both → `BatteryInverter:3 → Battery:4`.
+    #[test]
+    fn test_grid_formula_backs_a_diamond_with_both_legs_silent() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let a =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let b =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(grid, a);
+        builder.connect(grid, b);
+        builder.connect(a, inverter);
+        builder.connect(b, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "#3");
+
+        Ok(())
+    }
+
+    /// A reporting diamond gains the same backing — one meter dropping
+    /// out at runtime no longer nulls the sum — and a feed with nothing
+    /// in common keeps its own term.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2, Meter:5}`,
+    /// `{Meter:1, Meter:2} → BatteryInverter:3 → Battery:4`.
+    #[test]
+    fn test_grid_formula_groups_only_the_overlapping_feeds() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let a = builder.meter();
+        let b = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        let lone = builder.meter();
+        builder.connect(grid, a);
+        builder.connect(grid, b);
+        builder.connect(a, inverter);
+        builder.connect(b, inverter);
+        builder.connect(inverter, battery);
+        builder.connect(grid, lone);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.grid_formula()?.to_string(),
+            "COALESCE(#2 + #1, #3, COALESCE(#2, 0.0) + COALESCE(#1, 0.0)) + #5"
+        );
+
         Ok(())
     }
 }
