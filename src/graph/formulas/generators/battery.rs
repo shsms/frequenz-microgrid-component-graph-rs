@@ -86,7 +86,15 @@ where
                     )));
                 }
             }
-            inverter_ids.extend(graph.predecessors(*battery_id)?.map(|x| x.component_id()));
+            // Only battery inverters are battery-power sources. A hybrid
+            // inverter's AC reading mixes in its PV production, so it is
+            // left out — the same stance the no-selection path takes.
+            inverter_ids.extend(
+                graph
+                    .predecessors(*battery_id)?
+                    .filter(|x| x.is_battery_inverter(&graph.config))
+                    .map(|x| x.component_id()),
+            );
         }
         Ok(inverter_ids)
     }
@@ -387,6 +395,58 @@ mod tests {
         // Inverter falls back to its effective predecessor meter,
         // walking past the transformer.
         assert_eq!(formula, "COALESCE(#3, #1, 0.0)");
+        Ok(())
+    }
+
+    /// A hybrid inverter is not a battery-power source: its AC reading
+    /// mixes in its PV production. Selecting the battery explicitly must
+    /// agree with the no-selection path, which already leaves hybrids out.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → HybridInverter:2 → Battery:3`,
+    /// then a second chain `Meter:1 → Meter:4 → BatteryInverter:5 →
+    /// Battery:6`.
+    #[test]
+    fn test_battery_formula_ignores_a_hybrid_inverter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        let hybrid =
+            builder.add_component(crate::ComponentCategory::Inverter(InverterType::Hybrid));
+        let hybrid_battery = builder.battery();
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, hybrid);
+        builder.connect(hybrid, hybrid_battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.battery_formula(None)?.to_string(), "0.0");
+        assert_eq!(
+            graph
+                .battery_formula(Some(BTreeSet::from([3])))?
+                .to_string(),
+            "0.0"
+        );
+
+        // Next to a real battery chain, both entry points count only that
+        // chain.
+        let battery_meter = builder.meter();
+        let inverter = builder.battery_inverter();
+        let battery = builder.battery();
+        builder.connect(grid_meter, battery_meter);
+        builder.connect(battery_meter, inverter);
+        builder.connect(inverter, battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.battery_formula(None)?.to_string(),
+            "COALESCE(#5, #4, 0.0)"
+        );
+        assert_eq!(
+            graph
+                .battery_formula(Some(BTreeSet::from([3, 6])))?
+                .to_string(),
+            "COALESCE(#5, #4, 0.0)"
+        );
+
         Ok(())
     }
 }

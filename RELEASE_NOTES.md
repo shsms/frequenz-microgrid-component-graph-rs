@@ -2,21 +2,34 @@
 
 ## Summary
 
-This release lets formulas take a component's operational mode into account. The new `OperationalMode` enum and the `Node::operational_mode()` method tell the graph which components report telemetry. A component that provides no telemetry is not used as a measurement source, but it still classifies the meter that measures it.
+<!-- Here goes a general summary of what this release is about -->
+
+## Upgrading
+
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-- The `Node` trait has a new `operational_mode()` method. The default is `OperationalMode::Unspecified`, and a component in that mode is treated as providing telemetry, so existing `Node` implementations keep their behavior.
-
-- A component that provides no telemetry is not used as a measurement source in formulas. It is still used to classify the meter that measures it (e.g. as a PV meter or a CHP meter). What the formulas do instead:
-
-  - a component can still be measured through the meter above it;
-  - a meter is measured through its children, since it has no reading of its own — except a grid meter, which can carry loads that are not in the component graph, so the formula gets `None` for it;
-  - the consumer formula descends past such a meter and sums its reporting descendant meters;
-  - `component_formula()` and `component_ac_coalesce_formula()` return `None`, for a meter as well as for any other component.
-
-  A formula can also lose all its measurement sources. `pv_formula()` is `0.0` when the only PV inverter provides no telemetry and no meter measures it. `grid_formula()` is `None` when the grid meter provides no telemetry. A coalesce formula is `None` when no source component provides telemetry.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
 
-- `component_formula()` and `component_ac_coalesce_formula()` returned a formula for any component id. They now return an error when the given id is not in the graph.
+- The consumer formula counted battery, PV, CHP, EV charger, wind turbine and steam boiler chains as site consumption when the grid connection point has a direct child that is not a grid meter — an inverter wired straight to the grid, for example. Those chains are now subtracted, as they already were when only grid meters sit below the grid connection point. A chain fed from outside the summed meters stays counted, because the sum never added its power in the first place. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
+
+- The consumer formula subtracted part of a battery, PV, CHP, EV charger, wind turbine or steam boiler chain twice when that chain is fed from two places — through a meter of its own and directly from a second meter. The meter above the chain reads only the part flowing through it, but its reading was subtracted as a whole chain's, on top of the chain's own reading. Site consumption came out too low, often clamped to zero. Such a chain is now subtracted once, through one term that covers both feeds. When the chain has no reading of its own to give, the meter's reading stands in for the one feed it carries. When even the meter reports nothing, nothing is subtracted for that chain. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
+
+- The consumer formula counted the power a battery, PV, CHP, EV charger, wind turbine or steam boiler chain draws through a silent meter as site consumption when the chain sits behind two parallel meters and one reports nothing: the silent feed's flow was never subtracted. Such a chain is now subtracted through its own reading, which covers both feeds. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
+
+- The consumer formula reported the site's battery, PV, CHP, EV charger, wind turbine and steam boiler chains, with the sign flipped, as consumption when the grid meter provides no telemetry. There is no grid reading to subtract them from. Such a graph now takes the summed-meters shape: the topmost reporting meters below the silent grid meter measure the site, and the chains their sum covers are subtracted. The grid formula makes the same descent, so both formulas report the reporting meters' feeds. The readings miss unmodeled loads on the silent segment, and what a covered meter draws through a silent parallel feed. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.
+
+- The grid formula measured each feed of a root-level meter diamond — two meters under the grid connection point feeding one chain — on its own. A feed whose meter provides no telemetry became a hard `0.0`, so the site total was missing that feed's whole flow, even though the chain's own reading covers both feeds. Such feeds are now measured as one diamond: the meter sum, backed by the shared components' readings. An alternative that can never resolve — a sum with a silent meter in it — is left out of the formula. Reporting diamonds gain the same backing, so one meter dropping offline no longer makes the sum unavailable.
+
+- The grid formula lost its deeper fallbacks when a meter inside a grid-meter chain provides no telemetry: the formula was the top reading alone, and went unavailable whenever the top meter dropped offline. The chain now resolves past the silent link, so the readings below it back the top reading, as they already did in a fully reporting chain. The grid meter itself descends the same way: when it reports nothing, its term is its reporting children's sum instead of `None`, so the site total stays available. Only a silent grid meter with no child read through it alone still yields `None`.
+
+- The producer formula measured each PV or CHP meter, and each component reachable without passing such a meter, in isolation. A PV inverter shared by two PV meters vanished from the sum, and one fed by both a PV meter and a second meter was counted twice — once through its own reading and once through the meter's. The formula now measures all PV and CHP components in one pass, so every component appears exactly once. A meter with both a PV inverter and a CHP behind it now nets the two inside one clamp, like same-category siblings, instead of clamping each component separately.
+
+- With `include_phantom_loads_in_consumer_formula`, sibling meters that partly share successors were split into overlapping diamond groups: the bridging meter's reading was added to two groups and each shared child meter was subtracted twice, so the reported consumption depended on component-id order and could be wrong in either direction. Such meters now merge into one group, so every reading is counted once and every shared child subtracted once.
+
+- `battery_formula` and `battery_ac_coalesce_formula` treated a hybrid inverter feeding a selected battery as a battery-power source: with explicit battery ids, the hybrid's AC reading — battery power plus its PV production — was counted as battery power, while the same call without ids left it out. Both calls now leave hybrid inverters out on both paths, so the two entry points agree.
+
+- The consumer formula subtracted battery, PV, CHP, EV charger, wind turbine and steam boiler chains behind a grid meter that provides no telemetry, when another grid meter reports. Those chains were taken out of readings that never carried them — a discharging battery on the silent feed inflated site consumption. Such graphs take the summed-meters shape too: the silent meter's line is measured by the reporting children read through it alone, loads behind it now count, and a chain the sum does not cover stays out. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.

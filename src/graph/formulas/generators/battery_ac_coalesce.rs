@@ -267,4 +267,32 @@ mod tests {
         );
         Ok(())
     }
+
+    /// A hybrid inverter is not a battery-chain voltage source either:
+    /// selecting its battery explicitly must agree with the no-selection
+    /// path, which leaves hybrids out.
+    ///
+    /// Topology (ids): `Grid:0 → Meter:1 → HybridInverter:2 → Battery:3`.
+    #[test]
+    fn test_battery_ac_voltage_formula_ignores_a_hybrid_inverter() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        let hybrid = builder.add_component(ComponentCategory::Inverter(InverterType::Hybrid));
+        let battery = builder.battery();
+        builder.connect(grid, grid_meter);
+        builder.connect(grid_meter, hybrid);
+        builder.connect(hybrid, battery);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.battery_ac_coalesce_formula(None)?.to_string(), "None");
+        assert_eq!(
+            graph
+                .battery_ac_coalesce_formula(Some(BTreeSet::from([3])))?
+                .to_string(),
+            "None"
+        );
+
+        Ok(())
+    }
 }

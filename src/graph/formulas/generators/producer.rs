@@ -3,12 +3,10 @@
 
 //! This module contains the methods for generating producer formulas.
 
-use std::collections::BTreeSet;
-
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
-use crate::graph::formulas::fallback::{SourcePreference, aggregate};
+use crate::graph::formulas::fallback::{SourcePreference, aggregate_terms};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct ProducerFormulaBuilder<'a, N, E>
@@ -31,32 +29,26 @@ where
     /// Generates the production formula.
     ///
     /// The production formula is the sum of all the PV and CHP components in
-    /// the graph.
+    /// the graph, each measurement clamped so only production counts. Wind
+    /// turbines and steam boilers have per-category formulas of their own
+    /// and are not part of this sum.
     pub fn build(self) -> Result<Formula, Error> {
-        let mut expr = None;
-        for component_id in self.graph.find_all(
+        // One aggregation over the component set, so a component fed
+        // through two meters — or shared between two PV meters — is
+        // measured once. Per-meter aggregation counted such feeds twice
+        // and dropped shared components.
+        let targets = self.graph.find_all(
             self.graph.root_id,
-            |node| {
-                self.graph.is_pv_meter(node.component_id()).unwrap_or(false)
-                    || self
-                        .graph
-                        .is_chp_meter(node.component_id())
-                        .unwrap_or(false)
-                    || node.is_pv_inverter()
-                    || node.is_chp()
-            },
+            |node| node.is_pv_inverter() || node.is_chp(),
             petgraph::Direction::Outgoing,
             false,
-        )? {
-            let comp_expr = aggregate(
-                self.graph,
-                BTreeSet::from([component_id]),
-                SourcePreference::ComponentsFirst,
-            )?
-            .min(Expr::number(0.0));
+        )?;
+        let mut expr = None;
+        for term in aggregate_terms(self.graph, targets, SourcePreference::ComponentsFirst)? {
+            let term = term.min(Expr::number(0.0));
             expr = match expr {
-                None => Some(comp_expr),
-                Some(e) => Some(e + comp_expr),
+                None => Some(term),
+                Some(e) => Some(e + term),
             };
         }
         Ok(expr
@@ -153,7 +145,11 @@ mod tests {
             )
         );
 
-        // Add a meter to the grid meter, that has a PV inverter and a CHP behind it.
+        // Add a meter to the grid meter, that has a PV inverter and a CHP
+        // behind it. The pair is netted inside one clamp, like same-meter
+        // siblings of one category: per-component terms would fall back to
+        // `#12 - #14` and `#12 - #13`, which overstate production when one
+        // sibling consumes while the other produces.
         let meter = builder.meter();
         let pv_inverter = builder.solar_inverter();
         let chp = builder.chp();
@@ -170,9 +166,68 @@ mod tests {
                 "MIN(COALESCE(#6, #5, 0.0), 0.0) + ",
                 "MIN(COALESCE(#7, 0.0), 0.0) + ",
                 "MIN(COALESCE(#8, 0.0), 0.0) + ",
-                "MIN(COALESCE(#13, #12 - #14, 0.0), 0.0) + ",
-                "MIN(COALESCE(#14, #12 - #13, 0.0), 0.0)"
+                "MIN(COALESCE(#14 + #13, #12, COALESCE(#14, 0.0) + COALESCE(#13, 0.0)), 0.0)"
             )
+        );
+
+        Ok(())
+    }
+
+    /// A PV inverter shared by two PV meters is measured once, by its own
+    /// reading with the meter diamond as fallback. Per-meter aggregation
+    /// dropped the shared inverter from both meters' terms.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1 → {PV:3, PV:4}, Meter:2 →
+    /// {PV:4, PV:5}}`.
+    #[test]
+    fn test_producer_formula_measures_a_shared_inverter_once() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let left_meter = builder.meter();
+        let right_meter = builder.meter();
+        let left_pv = builder.solar_inverter();
+        let shared_pv = builder.solar_inverter();
+        let right_pv = builder.solar_inverter();
+        builder.connect(grid, left_meter);
+        builder.connect(grid, right_meter);
+        builder.connect(left_meter, left_pv);
+        builder.connect(left_meter, shared_pv);
+        builder.connect(right_meter, shared_pv);
+        builder.connect(right_meter, right_pv);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.producer_formula()?.to_string(),
+            "MIN(COALESCE(#3 + #4 + #5, COALESCE(#1, 0.0) + COALESCE(#2, 0.0)), 0.0)"
+        );
+
+        Ok(())
+    }
+
+    /// A PV inverter fed from two meters is not counted through both: its
+    /// own reading covers both feeds. Per-meter aggregation added the
+    /// pure-PV meter's reading on top of the inverter's.
+    ///
+    /// Topology (ids): `Grid:0 → {Meter:1 → PV:3, Meter:2 → {PV:3,
+    /// EV:4}}`.
+    #[test]
+    fn test_producer_formula_counts_a_double_fed_inverter_once() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let pv_meter = builder.meter();
+        let mixed_meter = builder.meter();
+        let pv = builder.solar_inverter();
+        let ev = builder.ev_charger();
+        builder.connect(grid, pv_meter);
+        builder.connect(grid, mixed_meter);
+        builder.connect(pv_meter, pv);
+        builder.connect(mixed_meter, pv);
+        builder.connect(mixed_meter, ev);
+
+        let graph = builder.build(None)?;
+        assert_eq!(
+            graph.producer_formula()?.to_string(),
+            "MIN(COALESCE(#3, 0.0), 0.0)"
         );
 
         Ok(())
