@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
+use crate::graph::formulas::explain::{Explained, ExplanationKind};
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
@@ -51,8 +52,17 @@ where
     /// battery_ids are provided, only the batteries with the given ids are
     /// included in the formula.
     pub fn build(self) -> Result<Formula, Error> {
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
         if self.inverter_ids.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "No battery inverters are included, so the battery power is 0.0.",
+            ));
         }
 
         aggregate(
@@ -60,7 +70,6 @@ where
             self.inverter_ids.clone(),
             SourcePreference::prefer_meters(self.graph.config.prefer_meters_in_battery_formula()),
         )
-        .map(|explained| Formula::new(explained.expr))
     }
 
     pub(super) fn find_inverter_ids(
