@@ -14,6 +14,8 @@ pub mod iterators;
 
 use crate::{ComponentGraphConfig, Edge, Node};
 pub use formulas::Formula;
+#[cfg(feature = "explain")]
+pub use formulas::{ExplainedFormula, Explanation, ExplanationKind, FormulaAst};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 

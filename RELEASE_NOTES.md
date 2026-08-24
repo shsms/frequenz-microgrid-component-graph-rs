@@ -10,7 +10,9 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- New optional `explain` feature: formulas can explain themselves. Every `*_formula` method has an explained twin (e.g. `grid_formula_explained()`) that returns an `ExplainedFormula`: the same formula plus a tree of `Explanation` nodes. Each node names its role (an `ExplanationKind` like the meter fallback ladder, a diamond, or a sign clamp), says in plain words why that part of the formula is there, and lists the components it covers. The prose is specific: components are named by category ("PV inverter #4", "battery meter #2"), a no-telemetry exclusion names the operational mode that causes it, and a shape chosen by config says so ("preferred by config"). Parts that are left out on purpose are recorded too, e.g. a child meter skipped to avoid double counting, or a coalesce source without telemetry. Relational kinds carry the counterpart ids as fields: `ChildSkipped` names the sibling that already carries the flow, and `MeterDifference` names the summed meters and the subtracted siblings. `Formula::ast()` returns the formula as a `FormulaAst` tree, so a UI can render and highlight its parts.
+
+- New optional `serde` feature: `Formula` serializes as its formula string. Together with the `explain` feature, `ExplainedFormula`, `Explanation`, `ExplanationKind` and `FormulaAst` implement `serde::Serialize` too. The default feature set is unchanged.
 
 ## Bug Fixes
 

@@ -1,6 +1,7 @@
 // License: MIT
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![doc = include_str!("../README.md")]
 
 mod component_category;
@@ -11,6 +12,8 @@ pub use operational_mode::OperationalMode;
 
 mod graph;
 pub use graph::{ComponentGraph, Formula, iterators};
+#[cfg(feature = "explain")]
+pub use graph::{ExplainedFormula, Explanation, ExplanationKind, FormulaAst};
 
 mod graph_traits;
 pub use graph_traits::{Edge, Node};
