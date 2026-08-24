@@ -53,7 +53,8 @@ pub(crate) fn parent_meters<N: Node, E: Edge>(
 /// through them (a nested feed). Then the meters' readings account for
 /// `id`'s full throughput. A feed from outside the meters (another meter,
 /// the grid, or an unmodeled source) is not in those readings, so a sum or
-/// difference over them would miscount it.
+/// difference over them would miscount it. [`outside_feeds`] names the
+/// disqualifying feeds; keep the two in lockstep.
 pub(crate) fn reached_only_through<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
@@ -88,19 +89,65 @@ fn reached_only_through_inner<N: Node, E: Edge>(
     Ok(true)
 }
 
+/// The membership test [`reaches_any_below`] and [`reached_below`] share: a
+/// member of `set` other than the starting node itself (`id` may be in
+/// `set`).
+fn below_member<N: Node>(id: u64, set: &BTreeSet<u64>) -> impl Fn(&N) -> bool + '_ {
+    move |node| node.component_id() != id && set.contains(&node.component_id())
+}
+
 /// Whether `id` reaches any member of `set` strictly below itself, following
-/// the feed lines downward. The search starts at the node itself, so it is
-/// excluded explicitly (`id` may be in `set`).
+/// the feed lines downward. [`reached_below`] names the reached members.
 pub(crate) fn reaches_any_below<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     set: &BTreeSet<u64>,
 ) -> Result<bool, Error> {
-    graph.reaches_any(
-        id,
-        |node| node.component_id() != id && set.contains(&node.component_id()),
-        petgraph::Direction::Outgoing,
-    )
+    graph.reaches_any(id, below_member(id, set), petgraph::Direction::Outgoing)
+}
+
+/// The members of `set` that `id` reaches strictly below itself, following
+/// the feed lines downward — [`reaches_any_below`] with the reached members
+/// named, so an explanation can say who already carries the flow. Shares
+/// that predicate, so the two cannot drift apart; ascending, as the ids are
+/// rendered into rationale text.
+pub(super) fn reached_below<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    set: &BTreeSet<u64>,
+) -> Result<Vec<u64>, Error> {
+    Ok(graph
+        .find_all(
+            id,
+            below_member(id, set),
+            petgraph::Direction::Outgoing,
+            true,
+        )?
+        .into_iter()
+        .collect())
+}
+
+/// The feeds into `id` that disqualify it from [`reached_only_through`]: each
+/// predecessor that is not one of the `meters`, and is either a non-meter or
+/// a meter itself fed from outside them. Empty exactly when
+/// [`reached_only_through`] holds, so an explanation can name the parallel
+/// feeds.
+pub(super) fn outside_feeds<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    id: u64,
+    meters: &BTreeSet<u64>,
+) -> Result<Vec<u64>, Error> {
+    let mut feeds = Vec::new();
+    for predecessor in graph.predecessors(id)? {
+        let predecessor_id = predecessor.component_id();
+        if meters.contains(&predecessor_id) {
+            continue;
+        }
+        if !predecessor.is_meter() || !reached_only_through(graph, predecessor_id, meters)? {
+            feeds.push(predecessor_id);
+        }
+    }
+    Ok(feeds)
 }
 
 /// Returns true if the node is a grid meter.
