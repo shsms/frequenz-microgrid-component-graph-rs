@@ -458,6 +458,95 @@ pub struct ExplainedFormula {
     pub explanation: Explanation,
 }
 
+/// The final formula as a tree, for rendering and highlighting in UIs.
+///
+/// This mirrors the formula string exactly: rendering this tree with the
+/// formula grammar gives the same string as [`Formula`]'s `Display`.
+#[cfg(feature = "explain")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(tag = "op", rename_all = "snake_case")
+)]
+#[non_exhaustive]
+pub enum FormulaAst {
+    /// An empty formula, which evaluates to no value.
+    None,
+    /// A negation of an expression.
+    Neg {
+        /// The negated expression.
+        param: Box<FormulaAst>,
+    },
+    /// A numeric constant.
+    Number {
+        /// The constant value.
+        value: f64,
+    },
+    /// A reference to a component's reading (`#id`).
+    Component {
+        /// The component id.
+        component_id: u64,
+    },
+    /// An addition of expressions.
+    Add {
+        /// The summands.
+        params: Vec<FormulaAst>,
+    },
+    /// A subtraction: the first expression minus all the others.
+    Sub {
+        /// The first operand and the subtracted ones.
+        params: Vec<FormulaAst>,
+    },
+    /// A `COALESCE`: the first expression that has a value.
+    Coalesce {
+        /// The alternatives, in order.
+        params: Vec<FormulaAst>,
+    },
+    /// A `MIN` over expressions.
+    Min {
+        /// The compared expressions.
+        params: Vec<FormulaAst>,
+    },
+    /// A `MAX` over expressions.
+    Max {
+        /// The compared expressions.
+        params: Vec<FormulaAst>,
+    },
+}
+
+#[cfg(feature = "explain")]
+impl From<&Expr> for FormulaAst {
+    fn from(expr: &Expr) -> Self {
+        let convert = |params: &[Expr]| params.iter().map(FormulaAst::from).collect();
+        match expr {
+            Expr::None => FormulaAst::None,
+            Expr::Neg { param } => FormulaAst::Neg {
+                param: Box::new(FormulaAst::from(param.as_ref())),
+            },
+            Expr::Number { value } => FormulaAst::Number { value: *value },
+            Expr::Component { component_id } => FormulaAst::Component {
+                component_id: *component_id,
+            },
+            Expr::Add { params } => FormulaAst::Add {
+                params: convert(params),
+            },
+            Expr::Sub { params } => FormulaAst::Sub {
+                params: convert(params),
+            },
+            Expr::Coalesce { params } => FormulaAst::Coalesce {
+                params: convert(params),
+            },
+            Expr::Min { params } => FormulaAst::Min {
+                params: convert(params),
+            },
+            Expr::Max { params } => FormulaAst::Max {
+                params: convert(params),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,6 +616,8 @@ mod tests {
         assert_serialize::<ExplainedFormula>();
         assert_serialize::<Explanation>();
         assert_serialize::<ExplanationKind>();
+        #[cfg(feature = "explain")]
+        assert_serialize::<FormulaAst>();
         assert_serialize::<Formula>();
     }
 
@@ -637,9 +728,48 @@ mod tests {
             .unwrap(),
             json!({"type": "metric", "metric": "grid"})
         );
+        #[cfg(feature = "explain")]
+        assert_eq!(
+            to_value(FormulaAst::from(
+                &Expr::component(1).coalesce(Expr::number(0.0))
+            ))
+            .unwrap(),
+            json!({"op": "coalesce", "params": [
+                {"op": "component", "component_id": 1},
+                {"op": "number", "value": 0.0},
+            ]})
+        );
         assert_eq!(
             to_value(Formula::new(Expr::component(1))).unwrap(),
             json!("#1")
+        );
+    }
+
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_formula_ast_mirrors_expr() {
+        let expr = Expr::component(1)
+            .coalesce(Expr::component(2) + Expr::component(3))
+            .min(Expr::number(0.0));
+        let ast = FormulaAst::from(&expr);
+        assert_eq!(
+            ast,
+            FormulaAst::Min {
+                params: vec![
+                    FormulaAst::Coalesce {
+                        params: vec![
+                            FormulaAst::Component { component_id: 1 },
+                            FormulaAst::Add {
+                                params: vec![
+                                    FormulaAst::Component { component_id: 2 },
+                                    FormulaAst::Component { component_id: 3 },
+                                ]
+                            },
+                        ]
+                    },
+                    FormulaAst::Number { value: 0.0 },
+                ]
+            }
         );
     }
 }

@@ -23,6 +23,16 @@ impl Formula {
         Formula { expr }
     }
 
+    /// Returns the formula as a tree, for rendering and highlighting in UIs.
+    ///
+    /// The tree mirrors the formula string exactly: rendering it with the
+    /// formula grammar gives the same string as this formula's `Display`.
+    #[cfg(feature = "explain")]
+    #[must_use]
+    pub fn ast(&self) -> super::explain::FormulaAst {
+        super::explain::FormulaAst::from(&self.expr)
+    }
+
     /// Returns a formula that evaluates to the first of `self` and `other` that
     /// has a value.
     #[must_use]
