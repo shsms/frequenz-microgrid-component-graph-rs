@@ -14,6 +14,8 @@
 
 - New optional `serde` feature: `Formula` serializes as its formula string. Together with the `explain` feature, `ExplainedFormula`, `Explanation`, `ExplanationKind` and `FormulaAst` implement `serde::Serialize` too. The default feature set is unchanged.
 
+- `ExplainedFormula::to_commented_string()` renders the formula with its reasons as `//` comments. The formula is laid out over several lines, and each part gets its reason on a comment line above it. A run of same-shaped terms (one per component) folds under a single comment — "Each of the 12 PV inverters …" — with each term on one line, so a large site stays readable; a reason already printed at the same level is not repeated. A run of same-shaped meter groups folds too, even when the groups' child counts differ: the shared fallback-ladder prose prints once above the run, and each group keeps a single comment naming its meter and members over its fully laid-out term. Parts that are left out on purpose get a comment too. A parser that skips `//` comments reads exactly the same formula as the plain `Display` string.
+
 ## Bug Fixes
 
 - The consumer formula counted battery, PV, CHP, EV charger, wind turbine and steam boiler chains as site consumption when the grid connection point has a direct child that is not a grid meter — an inverter wired straight to the grid, for example. Those chains are now subtracted, as they already were when only grid meters sit below the grid connection point. A chain fed from outside the summed meters stays counted, because the sum never added its power in the first place. Graphs that set `include_phantom_loads_in_consumer_formula` are not affected.

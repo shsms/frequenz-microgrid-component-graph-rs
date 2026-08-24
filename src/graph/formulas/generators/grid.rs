@@ -333,7 +333,8 @@ mod tests {
     /// A no-telemetry grid meter with nothing below it to read: every child
     /// is control-only, so no child sum is left and the term is null. The
     /// excluded children are still recorded — the meter's silent node
-    /// carries one silent part per child.
+    /// carries one silent part per child, and the commented rendering
+    /// prints their reasons and the `None` body.
     ///
     /// Topology (ids): `Grid:0 → GridMeter:1 (control-only) → {CHP:2, PV:3}
     /// (both control-only)`.
@@ -368,6 +369,16 @@ mod tests {
             assert_eq!(child.kind, ExplanationKind::NoTelemetryZero);
             assert_eq!(child.component_ids, vec![id]);
             assert_eq!(child.rendered(), None);
+        }
+        // The commented rendering keeps every reason and the `None` body.
+        #[cfg(feature = "explain")]
+        {
+            let commented = explained
+                .into_formula("grid", "The total power flow at the grid connection point.")
+                .to_commented_string();
+            assert!(commented.contains("Child CHP #2"));
+            assert!(commented.contains("Child PV inverter #3"));
+            assert!(commented.ends_with("\nNone"));
         }
         Ok(())
     }

@@ -14,6 +14,15 @@
 //! nested `COALESCE` calls are flattened). Use `component_ids` to link an
 //! explanation to the graph, and `rendered` to find its text in the full
 //! formula on a best-effort basis.
+//!
+//! Inside the crate, each node also keeps the sub-expression it explains
+//! ([`Explanation::expr`]). [`ExplainedFormula::to_commented_string`] uses it
+//! to render the formula with the reasons as `//` comments, aligned exactly.
+
+// The commented renderer backs `to_commented_string`, which only the
+// `explain` API exposes.
+#[cfg(feature = "explain")]
+mod comment;
 
 use super::expr::Expr;
 use super::formula::Formula;
@@ -456,6 +465,15 @@ pub struct ExplainedFormula {
     pub formula: Formula,
     /// The explanation tree. Its root covers the whole formula.
     pub explanation: Explanation,
+}
+
+/// Renders the plain formula, without comments. Same string as [`Formula`]'s
+/// `Display`. Use [`to_commented_string`](ExplainedFormula::to_commented_string)
+/// for the commented outline.
+impl std::fmt::Display for ExplainedFormula {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.formula.fmt(f)
+    }
 }
 
 /// The final formula as a tree, for rendering and highlighting in UIs.

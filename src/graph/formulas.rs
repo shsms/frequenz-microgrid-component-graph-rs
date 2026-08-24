@@ -12,9 +12,9 @@ use crate::Node;
 use crate::component_category::CategoryPredicates;
 
 // With `explain` off, the machinery still runs — the plain methods build
-// their formulas through it — while the outward-facing pieces (the AST
-// conversion) are gated out at their own definitions, so dead code still
-// surfaces in both configurations.
+// their formulas through it — while the outward-facing pieces (the commented
+// renderer, the AST conversion) are gated out at their own definitions, so
+// dead code still surfaces in both configurations.
 mod explain;
 mod expr;
 mod fallback;
@@ -473,7 +473,7 @@ mod tests {
         graph::test_utils::ComponentGraphBuilder,
     };
     #[cfg(feature = "explain")]
-    use crate::{ComponentGraphConfig, ExplanationKind};
+    use crate::{ComponentGraphConfig, ExplainedFormula, ExplanationKind};
 
     /// `component_formula` and `component_ac_coalesce_formula` return the bare
     /// reading of the requested component — no meter fallback, even when the
@@ -744,6 +744,47 @@ mod tests {
         Ok(())
     }
 
+    /// Stripping the comments and layout from every commented rendering
+    /// recovers the plain formula, for every metric under every config.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formulas_round_trip() -> Result<(), Error> {
+        let builder = rich_builder();
+        for config in configs() {
+            let graph = builder.build(config)?;
+
+            let cases: Vec<ExplainedFormula> = vec![
+                graph.grid_formula_explained()?,
+                graph.consumer_formula_explained()?,
+                graph.producer_formula_explained()?,
+                graph.battery_formula_explained(None)?,
+                graph.pv_formula_explained(None)?,
+                graph.chp_formula_explained(None)?,
+                graph.wind_turbine_formula_explained(None)?,
+                graph.ev_charger_formula_explained(None)?,
+                graph.steam_boiler_formula_explained(None)?,
+                graph.component_formula_explained(1)?,
+                graph.grid_coalesce_formula_explained()?,
+                graph.battery_ac_coalesce_formula_explained(None)?,
+                graph.pv_ac_coalesce_formula_explained(None)?,
+                graph.component_ac_coalesce_formula_explained(1)?,
+                // The no-telemetry inverter: a 0.0 and a None formula.
+                graph.component_formula_explained(27)?,
+                graph.component_ac_coalesce_formula_explained(27)?,
+            ];
+            for explained in cases {
+                assert_eq!(
+                    strip_comments(&explained.to_commented_string()),
+                    explained
+                        .formula
+                        .to_string()
+                        .replace(char::is_whitespace, "")
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// The explanation root names the metric, covers all the formula's
     /// component ids, and its `rendered` text matches the formula.
     #[cfg(feature = "explain")]
@@ -969,4 +1010,619 @@ mod tests {
         Ok(())
     }
 
+    /// Removes `//` comment lines and layout whitespace, to recover the flat
+    /// formula string.
+    #[cfg(feature = "explain")]
+    fn strip_comments(commented: &str) -> String {
+        commented
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<String>()
+            .replace(char::is_whitespace, "")
+    }
+
+    /// Asserts the commented rendering still reads back as `plain`: stripping
+    /// its comments and layout recovers the flat formula exactly. Both sides
+    /// drop whitespace, so the convention lives in one place.
+    #[cfg(feature = "explain")]
+    #[track_caller]
+    fn assert_round_trip(commented: &str, plain: &super::Formula) {
+        assert_eq!(
+            strip_comments(commented),
+            plain.to_string().replace(char::is_whitespace, "")
+        );
+    }
+
+    /// A battery meter-drill renders as a commented `COALESCE`, with the
+    /// best-effort child sum broken open one level deeper.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_expands_meter_drill() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let bat_chain = builder.meter_bat_chain(2, 2);
+        builder.connect(grid_meter, bat_chain);
+
+        let graph = builder.build(None)?;
+        let explained = graph.battery_formula_explained(None)?;
+
+        assert_eq!(
+            explained.to_commented_string(),
+            concat!(
+                "// battery: The total battery power. Batteries are DC components with no AC reading of their own, so
+",
+                "// they are measured through their inverters (and battery meters).
+",
+                "// Battery meter #2 measures exactly this group (#4, #3). Component readings are preferred, so their
+",
+                "// exact sum comes first; the meter reading is the fallback.
+",
+                "COALESCE(
+",
+                "    // The children's own readings, summed exactly: null unless every child reports, so a missing
+",
+                "    // reading moves on to the fallback instead of silently undercounting.
+",
+                "    #4 + #3,
+",
+                "    // The group's meter measures the same components together, so its reading can stand in when a
+",
+                "    // child reading is missing.
+",
+                "    #2,
+",
+                "    // The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "    // when only part of the group reports.
+",
+                "    // Each of the 2 child battery inverters adds its reading, with a 0.0 fallback so one offline
+",
+                "    // device does not null the whole sum.
+",
+                "    COALESCE(#4, 0.0) +
+",
+                "    COALESCE(#3, 0.0)
+",
+                ")",
+            )
+        );
+        // Stripping the comments and layout recovers the plain formula.
+        assert_eq!(
+            strip_comments(&explained.to_commented_string()),
+            graph
+                .battery_formula(None)?
+                .to_string()
+                .replace(char::is_whitespace, "")
+        );
+        Ok(())
+    }
+
+    /// The consumer clamp is broken open too: `MAX(` over the grid-minus-groups
+    /// subtraction, whose drilled groups nest a further call level.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_expands_consumer_clamp() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let pv_chain = builder.meter_pv_chain(2);
+        builder.connect(grid_meter, pv_chain);
+
+        let graph = builder.build(None)?;
+        let explained = graph.consumer_formula_explained()?;
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// consumer: The site's consumption: the power drawn by loads, excluding producers and storage.
+",
+                "// Consumption cannot be negative. MAX(_, 0.0) discards any surplus production the site feeds into
+",
+                "// the grid.
+",
+                "MAX(
+",
+                "    // The grid total minus the non-consumer groups (producers and storage): what remains is the
+",
+                "    // site's consumption.
+",
+                "    // Grid meter #1 is measured by its bare reading. Its own reading is the only source here, and
+",
+                "    // it also carries the site's unmodeled consumer load, which no sum of its children would
+",
+                "    // account for, so nothing can back it.
+",
+                "    #1 -
+",
+                "    // PV meter #2 measures exactly this group (#4, #3). Meters are preferred, so its reading comes
+",
+                "    // first; the sum of its children is the fallback.
+",
+                "    COALESCE(
+",
+                "        // The meter's own reading is the primary source: it measures all of its children together.
+",
+                "        #2,
+",
+                "        // The best-effort sum of the meter's usable children: each reading or 0.0, so it still
+",
+                "        // resolves when only part of the group reports.
+",
+                "        // Each of the 2 child PV inverters adds its reading, with a 0.0 fallback so one offline
+",
+                "        // device does not null the whole sum.
+",
+                "        COALESCE(#4, 0.0) +
+",
+                "        COALESCE(#3, 0.0)
+",
+                "    ),
+",
+                "    0.0
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.consumer_formula()?);
+        // Two call levels indent: `MAX(` then `COALESCE(`. The best-effort
+        // sum inside adds no indent of its own (its `+` terms sit at the
+        // COALESCE argument level), so the deepest indentation is two steps.
+        let max_indent = commented
+            .lines()
+            .map(|line| line.len() - line.trim_start().len())
+            .max()
+            .unwrap();
+        assert_eq!(max_indent, 2 * 4);
+        Ok(())
+    }
+
+    /// A component dropped for lack of telemetry keeps its reason on a
+    /// comment-only line, even where the surrounding term stays inline.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_notes_dropped_component() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let live = builder.meter_bat_chain(1, 1);
+        builder.connect(grid_meter, live);
+        let silent_meter = builder.meter();
+        let silent_inverter = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Battery),
+            OperationalMode::ControlOnly,
+        );
+        let silent_battery = builder.battery();
+        builder.connect(grid_meter, silent_meter);
+        builder.connect(silent_meter, silent_inverter);
+        builder.connect(silent_inverter, silent_battery);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .disable_fallback_components(true)
+                .build(),
+        ))?;
+        let explained = graph.battery_formula_explained(None)?;
+
+        assert_eq!(
+            explained.to_commented_string(),
+            concat!(
+                "// battery: The total battery power. Batteries are DC components with no AC reading of their own, so
+",
+                "// they are measured through their inverters (and battery meters).
+",
+                "// One term per measurement point. The points do not overlap, so summing them counts every component
+",
+                "// exactly once.
+",
+                "// Fallbacks are disabled by config, so battery inverter #3 is measured by its bare reading only.
+",
+                "#3
+",
+                "// Battery inverter #6 is in control-only mode and provides no telemetry. It has no reading to emit,
+",
+                "// so it is dropped.",
+            )
+        );
+        Ok(())
+    }
+
+    /// A term that is itself a sum (a no-telemetry meter measured through its
+    /// children) is flattened into the grid formula's sum. The term's reasons
+    /// stay attached to the run of operands it became.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_keeps_reasons_across_flattened_sums() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let silent_meter =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+        builder.connect(grid, silent_meter);
+        for _ in 0..2 {
+            let inverter = builder.battery_inverter();
+            let battery = builder.battery();
+            builder.connect(silent_meter, inverter);
+            builder.connect(inverter, battery);
+        }
+        let pv_inverter = builder.solar_inverter();
+        builder.connect(grid, pv_inverter);
+
+        let graph = builder.build(None)?;
+        let explained = graph.grid_formula_explained()?;
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// grid: The total power flow at the grid connection point.
+",
+                "// The sum of everything connected to the grid connection point, one term per connection.
+",
+                "// Battery meter #1 is in control-only mode and provides no telemetry, so its own reading must never
+",
+                "// appear. It is measured by the sum of its children instead.
+",
+                "// The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "// when only part of the group reports.
+",
+                "// Each of the 2 child battery inverters adds its reading, with a 0.0 fallback so one offline device
+",
+                "// does not null the whole sum.
+",
+                "COALESCE(#4, 0.0) +
+",
+                "COALESCE(#2, 0.0) +
+",
+                "// PV inverter #6 is measured by its own reading. The 0.0 fallback keeps the term total when the
+",
+                "// reading is missing.
+",
+                "COALESCE(#6, 0.0)",
+            )
+        );
+        assert_round_trip(&commented, &graph.grid_formula()?);
+        // Every term here carries its own 0.0, so this sum really is
+        // best-effort and keeps that kind. The kind splits on the guarantee,
+        // not on how the sum was built.
+        assert!(
+            explained
+                .explanation
+                .nodes()
+                .iter()
+                .any(|node| node.kind == ExplanationKind::BestEffortSum),
+        );
+        Ok(())
+    }
+
+    /// A term's reason describes the shape it lands in. Children of
+    /// different categories do not fold into a run, so each prints its own
+    /// singular reason — and with siblings to be summed with, that reason
+    /// may talk about the sum and the group. The counterpart is the
+    /// merged-coalesce test, where a lone child says only "the term".
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_sums_unfoldable_children_each_with_its_reason() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let silent =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+        builder.connect(grid, silent);
+        let pv = builder.solar_inverter();
+        let chp = builder.chp();
+        builder.connect(silent, pv);
+        builder.connect(silent, chp);
+
+        let graph = builder.build(None)?;
+        let explained = graph.grid_formula_explained()?;
+        assert_eq!(
+            explained.formula.to_string(),
+            "COALESCE(#3, 0.0) + COALESCE(#2, 0.0)"
+        );
+        let commented = explained.to_commented_string();
+        for reason in [
+            "// Child CHP #3's reading. The 0.0 fallback keeps the sum total when the device is offline, so one\n// silent child does not null the whole group.",
+            "// Child PV inverter #2's reading. The 0.0 fallback keeps the sum total when the device is offline,\n// so one silent child does not null the whole group.",
+        ] {
+            assert!(
+                commented.contains(reason),
+                "missing:\n{reason}\nin:\n{commented}"
+            );
+        }
+        assert_round_trip(&commented, &graph.grid_formula()?);
+        Ok(())
+    }
+
+    /// A grid meter chain coalesces to the child grid meter's bare reading:
+    /// `COALESCE(#1, #2)`, no 0.0 anywhere, so no comment may claim one. The
+    /// sole child is also measured on its own — a sum node above it would
+    /// repeat it exactly — so the drill names it as the fallback directly.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_grid_meter_chain_claims_no_zero_fallback() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let meter1 = builder.meter();
+        let meter2 = builder.meter();
+        let bat_chain = builder.meter_bat_chain(1, 1);
+        let pv_chain = builder.meter_pv_chain(1);
+        builder.connect(grid, meter1);
+        builder.connect(meter1, meter2);
+        builder.connect(meter2, bat_chain);
+        builder.connect(meter2, pv_chain);
+
+        let graph = builder.build(None)?;
+        let explained = graph.grid_formula_explained()?;
+        assert_eq!(explained.formula.to_string(), "COALESCE(#1, #2)");
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// grid: The total power flow at the grid connection point.
+",
+                "// Grid meter #1 measures exactly this group (#2). Meters are preferred, so its reading comes first;
+",
+                "// its child is the fallback.
+",
+                "COALESCE(
+",
+                "    // The meter's own reading is the primary source: it measures all of its children together.
+",
+                "    #1,
+",
+                "    // Grid meter #2 is measured by its bare reading. Its own reading is the only source here, and
+",
+                "    // it also carries the site's unmodeled consumer load, which no sum of its children would
+",
+                "    // account for, so nothing can back it.
+",
+                "    #2
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.grid_formula()?);
+        Ok(())
+    }
+
+    /// A meter with a single reporting child (meters first) merges the
+    /// child's `COALESCE` into the drill's own: `COALESCE(#1, #2, 0.0)`. The
+    /// merged part's reasons keep their place above the operands it became.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_keeps_reasons_across_merged_coalesce() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid, bat_chain);
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .prefer_meters_in_component_formulas(true)
+                .build(),
+        ))?;
+        let explained = graph.battery_formula_explained(None)?;
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// battery: The total battery power. Batteries are DC components with no AC reading of their own, so
+",
+                "// they are measured through their inverters (and battery meters).
+",
+                "// Battery meter #1 measures exactly this group (#2). Meters are preferred by config, so its reading
+",
+                "// comes first; its child is the fallback.
+",
+                "COALESCE(
+",
+                "    // The meter's own reading is the primary source: it measures all of its children together.
+",
+                "    #1,
+",
+                "    // Child battery inverter #2's reading. The 0.0 fallback keeps the term total when the device is
+",
+                "    // offline.
+",
+                "    #2,
+",
+                "    0.0
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.battery_formula(None)?);
+        Ok(())
+    }
+
+    /// A subtracted operand that is a sum keeps its brackets, spread over its
+    /// own lines, so the reasons inside it are kept too.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_brackets_subtracted_sums() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let silent_meter =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+        builder.connect(grid_meter, silent_meter);
+        for _ in 0..2 {
+            let inverter = builder.battery_inverter();
+            let battery = builder.battery();
+            builder.connect(silent_meter, inverter);
+            builder.connect(inverter, battery);
+        }
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .include_phantom_loads_in_consumer_formula(true)
+                .build(),
+        ))?;
+        let explained = graph.consumer_formula_explained()?;
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// consumer: The site's consumption: the power drawn by loads, excluding producers and storage.
+",
+                "// Phantom loads are included (by config): each meter contributes its residual (reading minus
+",
+                "// modeled successors), plus the consumers connected directly to the grid.
+",
+                "// Consumption cannot be negative. MAX(_, 0.0) discards any production measured on the same lines.
+",
+                "MAX(
+",
+                "    // Meter #1's reading minus its modeled successors: the load connected to the meter that is not
+",
+                "    // in the graph — its phantom load.
+",
+                "    #1 -
+",
+                "    (
+",
+                "        // Successor battery meter #2 is modeled in the graph, so its measurement is subtracted from
+",
+                "        // the residual.
+",
+                "        // Battery meter #2 is in control-only mode and provides no telemetry, so its own reading
+",
+                "        // must never appear. It is measured by the sum of its children instead.
+",
+                "        // The best-effort sum of the meter's usable children: each reading or 0.0, so it still
+",
+                "        // resolves when only part of the group reports.
+",
+                "        // Each of the 2 child battery inverters adds its reading, with a 0.0 fallback so one
+",
+                "        // offline device does not null the whole sum.
+",
+                "        COALESCE(#5, 0.0) +
+",
+                "        COALESCE(#3, 0.0)
+",
+                "    ),
+",
+                "    0.0
+",
+                ")
+",
+                "// Battery meter #2 is in control-only mode and provides no telemetry. Its phantom load cannot be
+",
+                "// calculated, so it adds no term.",
+            )
+        );
+        assert_round_trip(&commented, &graph.consumer_formula()?);
+        Ok(())
+    }
+
+    /// A None-valued formula still renders its body and its reason: the
+    /// comments say why there is no source, and stripping them recovers the
+    /// plain `None` string.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_renders_none() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let silent_inverter = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Battery),
+            OperationalMode::ControlOnly,
+        );
+        let battery = builder.battery();
+        builder.connect(grid, silent_inverter);
+        builder.connect(silent_inverter, battery);
+
+        let graph = builder.build(None)?;
+        let explained = graph.component_ac_coalesce_formula_explained(1)?;
+        assert_eq!(explained.to_string(), "None");
+        assert_eq!(
+            explained.to_commented_string(),
+            concat!(
+                "// component_ac_coalesce: A non-aggregating metric (like AC voltage or frequency) of a single
+",
+                "// component.
+",
+                "// Battery inverter #1 is in control-only mode and provides no telemetry. It has no reading, so this
+",
+                "// non-aggregating formula is None.
+",
+                "None",
+            )
+        );
+        assert_eq!(strip_comments(&explained.to_commented_string()), "None");
+        Ok(())
+    }
+
+    /// A one-line term's silent notes join the comment block above the line:
+    /// below it, they would read as the next operand's reason.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_notes_precede_one_line_term() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let bat_chain = builder.meter_bat_chain(1, 1);
+        builder.connect(grid_meter, bat_chain);
+        let pv_inverter = builder.solar_inverter();
+        builder.connect(grid_meter, pv_inverter);
+        let inactive = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Pv),
+            OperationalMode::Inactive,
+        );
+        builder.connect(grid_meter, inactive);
+
+        let graph = builder.build(None)?;
+        let commented = graph.grid_formula_explained()?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// grid: The total power flow at the grid connection point.
+",
+                "// Grid meter #1 is measured by its bare reading. Its own reading is the only source here, and it
+",
+                "// also carries the site's unmodeled consumer load, which no sum of its children would account for,
+",
+                "// so nothing can back it.
+",
+                "// Child PV inverter #6 is inactive and provides no telemetry: it has no reading to add, so the
+",
+                "// child sums leave it out. The meter's own reading still covers its flow.
+",
+                "#1",
+            )
+        );
+        assert_round_trip(&commented, &graph.grid_formula()?);
+        Ok(())
+    }
+
+    /// `Display` (and `to_string`) give the plain formula, without comments.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_display_is_plain() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        let bat_chain = builder.meter_bat_chain(2, 2);
+        builder.connect(grid_meter, bat_chain);
+
+        let graph = builder.build(None)?;
+        let explained = graph.battery_formula_explained(None)?;
+
+        assert_eq!(
+            explained.to_string(),
+            graph.battery_formula(None)?.to_string()
+        );
+        assert!(!explained.to_string().contains("//"));
+        Ok(())
+    }
 }
