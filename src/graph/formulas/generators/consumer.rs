@@ -95,7 +95,11 @@ where
             .map(|successor| successor.component_id())
             .collect::<BTreeSet<_>>();
         let targets = chains::subtraction_targets(self.graph, &meters)?;
-        for term in aggregate_terms(self.graph, targets, SourcePreference::MetersFirst)? {
+        for term in aggregate_terms(
+            self.graph,
+            targets,
+            SourcePreference::MetersFirst { by_config: false },
+        )? {
             expr = expr - term;
         }
 
@@ -133,9 +137,12 @@ where
 
         // The summed meters are off limits as measurement sources: a term
         // reading one of them would cancel it out of the sum.
-        for term in
-            aggregate_terms_avoiding(self.graph, targets, SourcePreference::MetersFirst, &summed)?
-        {
+        for term in aggregate_terms_avoiding(
+            self.graph,
+            targets,
+            SourcePreference::MetersFirst { by_config: false },
+            &summed,
+        )? {
             expr = expr - term;
         }
 

@@ -70,18 +70,24 @@ pub(crate) enum SourcePreference {
     /// Component readings are the primary source; meter readings are the fallback.
     ComponentsFirst,
     /// Meter readings are the primary source; component readings are the fallback.
-    MetersFirst,
+    MetersFirst {
+        /// Whether a `prefer_meters_in_*` config option chose this (rather
+        /// than the metric's own structure); explanations then say
+        /// "preferred by config".
+        by_config: bool,
+    },
     /// Like [`SourcePreference::MetersFirst`], but a meter may also be measured through a
     /// single (non-component) child meter instead of standing alone.
     MetersFirstWithChains,
 }
 
 impl SourcePreference {
-    /// Meter readings primary when `prefer_meters`, component readings primary
-    /// otherwise. (For meter chains, name [`SourcePreference::MetersFirstWithChains`].)
+    /// Meter readings primary when `prefer_meters` (a config choice),
+    /// component readings primary otherwise. (For meter chains, name
+    /// [`SourcePreference::MetersFirstWithChains`].)
     pub(crate) fn prefer_meters(prefer_meters: bool) -> Self {
         if prefer_meters {
-            SourcePreference::MetersFirst
+            SourcePreference::MetersFirst { by_config: true }
         } else {
             SourcePreference::ComponentsFirst
         }
@@ -91,8 +97,13 @@ impl SourcePreference {
     fn meters_first(self) -> bool {
         matches!(
             self,
-            SourcePreference::MetersFirst | SourcePreference::MetersFirstWithChains
+            SourcePreference::MetersFirst { .. } | SourcePreference::MetersFirstWithChains
         )
+    }
+
+    /// Whether a `prefer_meters_in_*` config option is why meters are primary.
+    fn meters_first_by_config(self) -> bool {
+        matches!(self, SourcePreference::MetersFirst { by_config: true })
     }
 
     /// Whether a meter may be measured through a single (non-component) child meter.
@@ -186,5 +197,9 @@ pub(crate) fn measures_nothing<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
 ) -> Result<bool, Error> {
-    Ok(measure(graph, id, SourcePreference::MetersFirst)? == Expr::number(0.0))
+    Ok(measure(
+        graph,
+        id,
+        SourcePreference::MetersFirst { by_config: false },
+    )? == Expr::number(0.0))
 }

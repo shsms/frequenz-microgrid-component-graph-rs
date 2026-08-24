@@ -75,11 +75,15 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([1, 2]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "#1 + COALESCE(#2, #3, 0.0)");
 
-    let expr = aggregate(&graph, BTreeSet::from([3]), SourcePreference::MetersFirst)?;
+    let expr = aggregate(
+        &graph,
+        BTreeSet::from([3]),
+        SourcePreference::MetersFirst { by_config: false },
+    )?;
     assert_eq!(expr.to_string(), "COALESCE(#2, #3, 0.0)");
     let expr = aggregate(
         &graph,
@@ -109,11 +113,15 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([1, 2]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "#1 + #2");
 
-    let expr = aggregate(&graph, BTreeSet::from([3]), SourcePreference::MetersFirst)?;
+    let expr = aggregate(
+        &graph,
+        BTreeSet::from([3]),
+        SourcePreference::MetersFirst { by_config: false },
+    )?;
     assert_eq!(expr.to_string(), "#3");
 
     // Add a battery meter with three inverter and three batteries
@@ -143,7 +151,7 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 5]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(
         expr.to_string(),
@@ -156,7 +164,7 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 6, 7, 8]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(
         expr.to_string(),
@@ -169,7 +177,7 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 7, 8]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(
         expr.to_string(),
@@ -194,21 +202,21 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 5]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "#2 + #5");
 
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 6, 7, 8]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "#2 + #6 + #7 + #8");
 
     let expr = aggregate(
         &graph,
         BTreeSet::from([2, 7, 8]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "#2 + #7 + #8");
 
@@ -227,7 +235,7 @@ fn test_aggregate() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([5, 12]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(
         expr.to_string(),
@@ -357,7 +365,12 @@ fn test_aggregate_diamond() -> Result<(), Error> {
 
     // Meters primary: their sum, then the inverter, then a best-effort sum.
     assert_eq!(
-        aggregate(&graph, targets.clone(), SourcePreference::MetersFirst)?.to_string(),
+        aggregate(
+            &graph,
+            targets.clone(),
+            SourcePreference::MetersFirst { by_config: false }
+        )?
+        .to_string(),
         "COALESCE(#1 + #2, #3, COALESCE(#1, 0.0) + COALESCE(#2, 0.0))",
     );
     // Components primary: the inverter, then the best-effort meter sum (the
@@ -402,7 +415,7 @@ fn test_stands_alone() -> Result<(), Error> {
     assert!(!super::emit::stands_alone(
         &graph,
         component_meter.component_id(),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?);
     assert!(super::emit::stands_alone(
         &graph,
@@ -438,7 +451,7 @@ fn test_stands_alone_total_through_child_meter() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([mixed_meter.component_id()]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     // The battery sub-meter (#4) is backed by its inverter (#5), not a
     // bare `#4` that would null the sum while #5 still reports.
@@ -490,7 +503,12 @@ fn test_substitution_asymmetric_diamond_order_independent() -> Result<(), Error>
             "shared_id_first: {shared_id_first}",
         );
         assert_eq!(
-            aggregate(&graph, targets, SourcePreference::MetersFirst)?.to_string(),
+            aggregate(
+                &graph,
+                targets,
+                SourcePreference::MetersFirst { by_config: false }
+            )?
+            .to_string(),
             "COALESCE(#2 + #3, #4 + #5, COALESCE(#2, 0.0) + COALESCE(#3, 0.0))",
             "shared_id_first: {shared_id_first}",
         );
@@ -619,7 +637,7 @@ fn test_child_meter_diamond_stays_bare() -> Result<(), Error> {
         aggregate(
             &graph,
             BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "COALESCE(#2, #5 + #4 + COALESCE(#3, 0.0))",
@@ -670,7 +688,12 @@ fn test_aggregate_subtraction() -> Result<(), Error> {
 
     // Meters primary: the difference, then the per-inverter sum.
     assert_eq!(
-        aggregate(&graph, targets.clone(), SourcePreference::MetersFirst)?.to_string(),
+        aggregate(
+            &graph,
+            targets.clone(),
+            SourcePreference::MetersFirst { by_config: false }
+        )?
+        .to_string(),
         concat!(
             "COALESCE(#2 - #8, ",
             "COALESCE(#3, 0.0) + COALESCE(#4, 0.0) + COALESCE(#5, 0.0) + ",
@@ -748,7 +771,12 @@ fn test_aggregate_subtraction_diamond() -> Result<(), Error> {
         "COALESCE(#4, #2 + #3 - #5, 0.0)",
     );
     assert_eq!(
-        aggregate(&graph, targets, SourcePreference::MetersFirst)?.to_string(),
+        aggregate(
+            &graph,
+            targets,
+            SourcePreference::MetersFirst { by_config: false }
+        )?
+        .to_string(),
         "COALESCE(#2 + #3 - #5, #4, 0.0)",
     );
 
@@ -1129,7 +1157,7 @@ fn test_children_fallback_drops_feeder_of_sibling() -> Result<(), Error> {
         aggregate(
             &graph,
             BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "COALESCE(#2, COALESCE(#5, 0.0) + COALESCE(#3, 0.0))",
@@ -1167,7 +1195,7 @@ fn test_children_fallback_drops_transitive_feeder() -> Result<(), Error> {
         aggregate(
             &graph,
             BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "COALESCE(#2, #5, 0.0)",
@@ -1209,7 +1237,7 @@ fn test_children_fallback_drops_device_feeder() -> Result<(), Error> {
         aggregate(
             &graph,
             BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "#2",
@@ -1246,7 +1274,7 @@ fn test_children_fallback_drops_child_shared_with_parallel_meter() -> Result<(),
         aggregate(
             &graph,
             BTreeSet::from([meter_a.component_id(), meter_b.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "#2 + #3",
@@ -1286,7 +1314,7 @@ fn test_subsumed_sub_meter_stays_claimed() -> Result<(), Error> {
                 chp.component_id(),
                 nested_chp.component_id(),
             ]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "COALESCE(#3, COALESCE(#5, 0.0) + COALESCE(#4, #6, 0.0))",
@@ -1328,7 +1356,7 @@ fn test_grid_meter_never_backed_by_children() -> Result<(), Error> {
         aggregate(
             &graph,
             BTreeSet::from([fallback_grid_meter.component_id()]),
-            SourcePreference::MetersFirst,
+            SourcePreference::MetersFirst { by_config: false },
         )?
         .to_string(),
         "#2",
@@ -2035,7 +2063,7 @@ fn test_no_telemetry_meter_dropped() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([pv_meter.component_id()]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "COALESCE(#3, 0.0)");
     Ok(())
@@ -2113,7 +2141,7 @@ fn test_no_telemetry_sibling_keeps_feeder_meter() -> Result<(), Error> {
     let expr = aggregate(
         &graph,
         BTreeSet::from([mixed_meter.component_id()]),
-        SourcePreference::MetersFirst,
+        SourcePreference::MetersFirst { by_config: false },
     )?;
     assert_eq!(expr.to_string(), "COALESCE(#2, #3)");
     Ok(())

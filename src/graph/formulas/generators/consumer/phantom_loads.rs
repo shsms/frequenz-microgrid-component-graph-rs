@@ -138,7 +138,7 @@ where
                     aggregate(
                         self.graph,
                         BTreeSet::from([successor.0]),
-                        SourcePreference::MetersFirst,
+                        SourcePreference::MetersFirst { by_config: false },
                     )?
                 } else if successor.1.provides_telemetry() {
                     Expr::from(successor.1)
