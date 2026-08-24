@@ -3,6 +3,8 @@
 
 //! Tests for the consumer formula generator.
 
+use super::ConsumerFormulaBuilder;
+use crate::graph::formulas::explain::ExplanationKind;
 use crate::graph::test_utils::ComponentGraphBuilder;
 use crate::{ComponentCategory, ComponentGraphConfig, Error, InverterType, OperationalMode};
 
@@ -502,6 +504,71 @@ fn test_consumer_formula_phantom_loads_skips_no_telemetry_meter() -> Result<(), 
     // Meter #1's residual is unknowable and CHP #3 has no reading; only the
     // reporting meter #2 keeps a term.
     assert_eq!(graph.consumer_formula()?.to_string(), "MAX(#2, 0.0)");
+    // Both omissions are deliberate, so both get silent nodes: the meter's
+    // was always recorded, the CHP's must not be lost to the successor
+    // filter.
+    let explained = ConsumerFormulaBuilder::try_new(&graph)?.build_explained()?;
+    for id in [no_telemetry.component_id(), chp_no_telemetry.component_id()] {
+        assert!(
+            explained.explanation.nodes().iter().any(|node| {
+                node.kind == ExplanationKind::NoTelemetryZero
+                    && node.component_ids == [id]
+                    && node.rendered().is_none()
+            }),
+            "missing silent node for #{id}"
+        );
+    }
+    Ok(())
+}
+
+/// In the phantom-loads consumer formula, a battery inverter under the grid
+/// adds no term — battery flow is not site consumption — and the deliberate
+/// omission is recorded as a silent node naming that reason. The storage
+/// reason wins over the no-telemetry one: a silent battery inverter is
+/// excluded for being storage, not for its missing reading.
+///
+/// Topology (ids): `Grid:0 → BatteryInverter:1 → Battery:2`, plus
+/// `Grid:0 → BatteryInverter:3 (no telemetry) → Battery:4`.
+#[test]
+fn test_consumer_formula_phantom_loads_excludes_battery_inverter() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    builder.connect(grid, inverter);
+    builder.connect(inverter, battery);
+    let silent_inverter = builder.add_component_with_mode(
+        ComponentCategory::Inverter(InverterType::Battery),
+        OperationalMode::ControlOnly,
+    );
+    let silent_battery = builder.battery();
+    builder.connect(grid, silent_inverter);
+    builder.connect(silent_inverter, silent_battery);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .include_phantom_loads_in_consumer_formula(true)
+            .build(),
+    ))?;
+    assert_eq!(graph.consumer_formula()?.to_string(), "0.0");
+    let explained = ConsumerFormulaBuilder::try_new(&graph)?.build_explained()?;
+    for id in [inverter.component_id(), silent_inverter.component_id()] {
+        assert!(
+            explained.explanation.nodes().iter().any(|node| {
+                node.kind == ExplanationKind::StorageNotConsumption
+                    && node.component_ids == [id]
+                    && node.rendered().is_none()
+            }),
+            "missing storage node for #{id}"
+        );
+    }
+    assert!(
+        !explained.explanation.nodes().iter().any(|node| {
+            node.kind == ExplanationKind::NoTelemetryZero
+                && node.component_ids == [silent_inverter.component_id()]
+        }),
+        "the storage reason must replace the no-telemetry one, not join it"
+    );
     Ok(())
 }
 
@@ -1885,5 +1952,40 @@ fn test_consumer_formula_is_none_when_nothing_reports() -> Result<(), Error> {
     assert_eq!(graph.grid_formula()?.to_string(), "None");
     assert_eq!(graph.consumer_formula()?.to_string(), "None");
 
+    Ok(())
+}
+
+/// A no-telemetry diamond sibling is recorded as a silent part also when its
+/// id sorts after the reporting sibling's (the reporting sibling then visits
+/// the diamond first and removes it before the main loop reaches it).
+#[test]
+fn test_no_telemetry_diamond_sibling_gets_silent_node() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let meter_a = builder.meter();
+    builder.connect(grid, meter_a);
+    let silent_meter =
+        builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+    builder.connect(grid, silent_meter);
+    let inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    builder.connect(meter_a, inverter);
+    builder.connect(silent_meter, inverter);
+    builder.connect(inverter, battery);
+
+    let graph = builder.build(Some(
+        ComponentGraphConfig::builder()
+            .include_phantom_loads_in_consumer_formula(true)
+            .build(),
+    ))?;
+    let explained = ConsumerFormulaBuilder::try_new(&graph)?.build_explained()?;
+    assert!(explained.explanation.nodes().iter().any(|node| {
+        node.kind == ExplanationKind::NoTelemetryZero
+            && node.component_ids == [silent_meter.component_id()]
+            && node.rendered().is_none()
+            && node
+                .rationale
+                .starts_with("Diamond sibling battery meter #2")
+    }));
     Ok(())
 }

@@ -12,13 +12,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::component_category::CategoryPredicates;
-use crate::graph::formulas::Formula;
+use crate::graph::formulas::explain::{
+    Explained, Explanation, ExplanationKind, capitalized, id_list, sum_explained,
+};
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
 
 /// Generates the consumer formula with phantom loads counted in.
-pub(super) fn build<N: Node, E: Edge>(graph: &ComponentGraph<N, E>) -> Result<Formula, Error> {
+pub(super) fn build<N: Node, E: Edge>(graph: &ComponentGraph<N, E>) -> Result<Explained, Error> {
     PhantomLoads::try_new(graph)?.build()
 }
 
@@ -51,55 +53,106 @@ where
         })
     }
 
-    fn build(mut self) -> Result<Formula, Error> {
-        let mut all_meters = None;
+    fn build(mut self) -> Result<Explained, Error> {
+        let mut terms = Vec::new();
         while let Some(meter_id) = self.unvisited_meters.pop_first() {
             // A meter that provides no telemetry has no reading, so its phantom
             // load (its residual) is unknowable and it contributes no term. Its
-            // nested meters still get their own terms.
-            if !self.graph.component(meter_id)?.provides_telemetry() {
+            // nested meters still get their own terms. A silent part records
+            // the deliberate omission (its expression vanishes from the sum).
+            let component = self.graph.component(meter_id)?;
+            if !component.provides_telemetry() {
+                terms.push(Explained::silent(
+                    ExplanationKind::NoTelemetryZero,
+                    format!(
+                        "{} #{meter_id} {} and provides no telemetry. Its \
+                         phantom load cannot be calculated, so it adds no \
+                         term.",
+                        capitalized(self.graph.meter_role_label(meter_id)?),
+                        component.operational_mode().describe(),
+                    ),
+                    vec![meter_id],
+                ));
                 continue;
             }
-            let consumption = self.component_consumption(meter_id)?;
-            if let Some(expr) = all_meters {
-                all_meters = Some(expr + consumption);
-            } else {
-                all_meters = Some(consumption);
+            terms.push(self.component_consumption(meter_id)?);
+        }
+
+        // A non-meter grid successor contributes its own reading. Two kinds
+        // stay out on purpose, each recorded by a silent part: a battery
+        // inverter, because what a battery draws is not site consumption
+        // (even when the inverter reports); and a component that provides no
+        // telemetry, which has no reading to count as consumption.
+        let graph = self.graph;
+        let other_grid_successors = graph
+            .successors(graph.root_id)?
+            .filter(|s| !s.is_meter())
+            .map(|s| s.component_id())
+            .collect::<Vec<_>>();
+        for component_id in other_grid_successors {
+            let component = graph.component(component_id)?;
+            let label = capitalized(component.category().label());
+            if component.is_battery_inverter(&graph.config) {
+                terms.push(Explained::silent(
+                    ExplanationKind::StorageNotConsumption,
+                    format!(
+                        "{label} #{component_id} connects storage: what a \
+                         battery draws is not site consumption, so it adds \
+                         no term.",
+                    ),
+                    vec![component_id],
+                ));
+                continue;
             }
+            if !component.provides_telemetry() {
+                terms.push(Explained::silent(
+                    ExplanationKind::NoTelemetryZero,
+                    format!(
+                        "{label} #{component_id} {} and provides no \
+                         telemetry. It has no reading to count as \
+                         consumption, so it adds no term.",
+                        component.operational_mode().describe(),
+                    ),
+                    vec![component_id],
+                ));
+                continue;
+            }
+            terms.push(self.component_consumption(component_id)?);
         }
 
-        let other_grid_successors = self
-            .graph
-            .successors(self.graph.root_id)?
-            .filter(|s| {
-                !s.is_meter()
-                    && !s.is_battery_inverter(&self.graph.config)
-                    // A component that provides no telemetry has no reading to
-                    // count as consumption.
-                    && s.provides_telemetry()
-            })
-            .map(|s| self.component_consumption(s.component_id()))
-            .reduce(|a, b| Ok(a? + b?));
-
-        let other_grid_successors = match other_grid_successors {
-            Some(Ok(expr)) => Some(expr),
-            Some(Err(err)) => return Err(err),
-            None => None,
+        // Silent parts emit no expression; when nothing else does either,
+        // a 0.0 keeps the formula's value the same as before (a sum of
+        // only-silent parts would otherwise render as `None`). It also
+        // stands in for the whole sum when there are no terms at all.
+        let default_zero = || {
+            Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "No reporting meter or consumer adds a term, so the \
+                 consumption is 0.0.",
+            )
         };
-
-        match (all_meters, other_grid_successors) {
-            (Some(lhs), Some(rhs)) => Ok(Formula::new(lhs + rhs)),
-            (None, Some(expr)) | (Some(expr), None) => Ok(Formula::new(expr)),
-            (None, None) => Ok(Formula::new(Expr::number(0.0))),
+        if terms.iter().all(|term| matches!(term.expr, Expr::None)) {
+            terms.push(default_zero());
         }
+        Ok(sum_explained(
+            terms,
+            ExplanationKind::TermSum,
+            "Phantom loads are included (by config): each meter contributes \
+             its residual (reading minus modeled successors), plus the \
+             consumers connected directly to the grid.",
+        )
+        .unwrap_or_else(default_zero))
     }
 
-    fn component_consumption(&mut self, component_id: u64) -> Result<Expr, Error> {
+    fn component_consumption(&mut self, component_id: u64) -> Result<Explained, Error> {
         let component = self.graph.component(component_id)?;
         if component.is_meter() {
             self.unvisited_meters.remove(&component_id);
             // Create a formula expression from the component.
             let mut expr = Expr::from(component);
+            let mut parts = Vec::new();
+            let mut diamond_siblings = Vec::new();
 
             // Siblings sharing a successor form a diamond group measured by
             // one term. The relation closes transitively: a bridge meter
@@ -112,19 +165,38 @@ where
             let mut queue = vec![component_id];
             while let Some(member) = queue.pop() {
                 for sibling in self.graph.siblings_from_successors(member)? {
-                    if group.insert(sibling.component_id()) {
+                    let sibling_id = sibling.component_id();
+                    if group.insert(sibling_id) {
                         // A member that provides no telemetry has no reading
                         // to add to the diamond sum; its successors are
                         // still merged, so the group's residual stays
-                        // best-effort instead of going null.
+                        // best-effort instead of going null. A silent part
+                        // records it, unless the main loop already did (it
+                        // pops meters in id order, so a lower-id silent
+                        // member has its own record).
+                        let unvisited = self.unvisited_meters.remove(&sibling_id);
                         if sibling.provides_telemetry() {
                             expr = expr + sibling.into();
+                            diamond_siblings.push(sibling_id);
+                        } else if unvisited {
+                            parts.push(Explanation::silent(
+                                ExplanationKind::NoTelemetryZero,
+                                format!(
+                                    "Diamond sibling {} #{sibling_id} {} and \
+                                     provides no telemetry: its reading cannot \
+                                     join the diamond sum, so the residual is \
+                                     computed from the reporting siblings only.",
+                                    self.graph.meter_role_label(sibling_id)?,
+                                    sibling.operational_mode().describe(),
+                                ),
+                                vec![sibling_id],
+                            ));
                         }
-                        self.unvisited_meters.remove(&sibling.component_id());
-                        queue.push(sibling.component_id());
+                        queue.push(sibling_id);
                     }
                 }
             }
+            diamond_siblings.sort_unstable();
             let mut successors = BTreeMap::new();
             for &member in &group {
                 for successor in self.graph.successors(member)? {
@@ -135,34 +207,120 @@ where
             // Subtract each successor from the expression.
             for successor in successors {
                 let successor_expr = if successor.1.is_meter() {
-                    aggregate(
+                    let measured = aggregate(
                         self.graph,
                         BTreeSet::from([successor.0]),
                         SourcePreference::MetersFirst { by_config: false },
-                    )?
-                    .expr
+                    )?;
+                    parts.push(Explanation::new(
+                        ExplanationKind::SubtractedSuccessor,
+                        format!(
+                            "Successor {} #{} is modeled in the graph, so \
+                             its measurement is subtracted from the residual.",
+                            self.graph.meter_role_label(successor.0)?,
+                            successor.0
+                        ),
+                        &measured.expr,
+                        vec![measured.explanation],
+                    ));
+                    measured.expr
                 } else if successor.1.provides_telemetry() {
-                    Expr::from(successor.1)
+                    let successor_expr = Expr::from(successor.1);
+                    parts.push(
+                        Explanation::new(
+                            ExplanationKind::SubtractedSuccessor,
+                            format!(
+                                "Successor {} #{} is modeled in the graph, so its \
+                                 reading is subtracted from the residual.",
+                                successor.1.category().label(),
+                                successor.0
+                            ),
+                            &successor_expr,
+                            Vec::new(),
+                        )
+                        .each(format!(
+                            "Each of the {{n}} successor {}s is modeled in the \
+                             graph, so its reading is subtracted from the \
+                             residual.",
+                            successor.1.category().label(),
+                        )),
+                    );
+                    successor_expr
                 } else {
                     // No reading to subtract: the component's share stays in
                     // the meter's residual, i.e. counts as phantom load.
+                    parts.push(Explanation::silent(
+                        ExplanationKind::NoTelemetryZero,
+                        format!(
+                            "Successor {} #{} {} and provides no telemetry. \
+                             There is no reading to subtract, so its share \
+                             stays in the residual and counts as phantom \
+                             load.",
+                            successor.1.category().label(),
+                            successor.0,
+                            successor.1.operational_mode().describe(),
+                        ),
+                        vec![successor.0],
+                    ));
                     continue;
                 };
                 expr = expr - successor_expr;
             }
 
-            expr = expr.max(Expr::number(0.0));
+            let siblings_note = if diamond_siblings.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (plus its diamond siblings {}, which share successors with it)",
+                    id_list(&diamond_siblings)
+                )
+            };
+            let residual = Explained::compose(
+                expr,
+                ExplanationKind::PhantomLoadResidual,
+                format!(
+                    "Meter #{component_id}'s reading{siblings_note} minus its \
+                     modeled successors: the load connected to the meter that \
+                     is not in the graph — its phantom load."
+                ),
+                parts,
+            );
+            let mut consumption = residual.wrap(
+                |expr| expr.max(Expr::number(0.0)),
+                ExplanationKind::ConsumerClamp,
+                "Consumption cannot be negative. MAX(_, 0.0) discards any \
+                 production measured on the same lines.",
+            );
 
             // If the meter only has non-meter successors, its consumption
             // can be 0 when it can't be calculated.
             if self.graph.has_successors(component_id)?
                 && !self.graph.has_meter_successors(component_id)?
             {
-                expr = expr.coalesce(Expr::number(0.0));
+                consumption = consumption.wrap(
+                    |expr| expr.coalesce(Expr::number(0.0)),
+                    ExplanationKind::DefaultZero,
+                    "The meter has only device successors. When its reading is \
+                     missing, its residual cannot be calculated and is defined \
+                     as 0.0.",
+                );
             }
-            Ok(expr)
+            Ok(consumption)
         } else {
-            Ok(Expr::from(component).max(Expr::number(0.0)))
+            Ok(Explained::leaf(
+                Expr::from(component).max(Expr::number(0.0)),
+                ExplanationKind::ConsumerClamp,
+                format!(
+                    "{} #{component_id}'s reading counts as consumption. \
+                     MAX(_, 0.0) discards any production it measures.",
+                    capitalized(component.category().label()),
+                ),
+            )
+            .each(format!(
+                "Each of the {{n}} {}s counts its reading as consumption; \
+                 MAX(_, 0.0) discards any production it measures.",
+                component.category().label(),
+            )))
         }
     }
 }

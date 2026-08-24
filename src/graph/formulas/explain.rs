@@ -125,6 +125,10 @@ pub enum ExplanationKind {
     /// The grid formula minus the non-consumer groups (producers, storage):
     /// what remains is the site's consumption.
     NonConsumerSubtraction,
+    /// A storage component left out of a consumption sum: what a battery
+    /// draws is storage flow, not site consumption, so the component adds
+    /// no term even when it reports.
+    StorageNotConsumption,
     /// A `COALESCE` chain for non-aggregating metrics (voltage, frequency):
     /// the first source that has a value wins, in preference order.
     CoalesceChain,

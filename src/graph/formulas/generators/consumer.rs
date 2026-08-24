@@ -34,6 +34,7 @@ use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::{
         Formula,
+        explain::{Explained, Explanation, ExplanationKind, sum_explained},
         fallback::{SourcePreference, aggregate_terms, aggregate_terms_avoiding, is_grid_meter},
         generators::grid::GridFormulaBuilder,
     },
@@ -58,6 +59,11 @@ where
 
     /// Generates the consumer formula for the given node.
     pub fn build(self) -> Result<Formula, Error> {
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
         if self.graph.config.include_phantom_loads_in_consumer_formula {
             return phantom_loads::build(self.graph);
         }
@@ -68,7 +74,12 @@ where
             .collect::<Vec<_>>();
 
         if grid_successors.is_empty() {
-            return Ok(Formula::new(Expr::number(0.0)));
+            return Ok(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "Nothing is connected to the grid connection point, so the \
+                 consumption is 0.0.",
+            ));
         }
 
         if grid_successors
@@ -86,8 +97,10 @@ where
     /// Every grid meter reports here — a graph with a silent one takes the
     /// summed-meters shape instead — so the grid reading covers every feed
     /// and every chain can be subtracted.
-    fn build_with_grid_meter(&self) -> Result<Formula, Error> {
-        let mut expr = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
+    fn build_with_grid_meter(&self) -> Result<Explained, Error> {
+        let grid = GridFormulaBuilder::try_new(self.graph)?.build_explained()?;
+        let mut expr = grid.expr;
+        let mut parts = vec![grid.explanation];
 
         let meters = self
             .graph
@@ -101,32 +114,78 @@ where
             SourcePreference::MetersFirst { by_config: false },
         )? {
             expr = expr - term.expr;
+            parts.push(term.explanation);
         }
 
-        Ok(Formula::new(expr.max(Expr::number(0.0))))
+        Ok(Explained::compose(
+            expr,
+            ExplanationKind::NonConsumerSubtraction,
+            "The grid total minus the non-consumer groups (producers and \
+             storage): what remains is the site's consumption.",
+            parts,
+        )
+        .wrap(
+            |expr| expr.max(Expr::number(0.0)),
+            ExplanationKind::ConsumerClamp,
+            "Consumption cannot be negative. MAX(_, 0.0) discards any surplus \
+             production the site feeds into the grid.",
+        ))
     }
 
     /// The sum of the topmost reporting meters, minus the component chains
     /// those readings cover.
-    fn build_without_grid_meter(&self) -> Result<Formula, Error> {
+    fn build_without_grid_meter(&self) -> Result<Explained, Error> {
         let summed = meters::summed(self.graph)?;
 
-        let Some(mut expr) = summed
+        let readings = summed
             .iter()
-            .copied()
-            .map(Expr::component)
-            .reduce(|sum, component| sum + component)
-        else {
+            .map(|&meter_id| {
+                Explained::leaf(
+                    Expr::component(meter_id),
+                    ExplanationKind::MeterReading,
+                    format!(
+                        "Meter #{meter_id} is the topmost reporting meter on \
+                         its line, so its reading measures that line."
+                    ),
+                )
+                .each(
+                    "Each of the {n} meters is the topmost reporting meter on \
+                     its line, so its reading measures that line.",
+                )
+            })
+            .collect::<Vec<_>>();
+        let Some(summed_readings) = sum_explained(
+            readings,
+            ExplanationKind::TermSum,
+            "The site has no grid meter, so the topmost reporting meters \
+             measure it between them.",
+        ) else {
             // Nothing to sum. A graph with no reading at all — the grid
             // formula is null too — has no answer; a graph that is merely
             // meterless consumes nothing it can see, and 0.0 is right.
-            let grid = GridFormulaBuilder::try_new(self.graph)?.build()?.expr;
-            return Ok(if matches!(grid, Expr::None) {
-                Expr::None.into()
-            } else {
-                Formula::new(Expr::number(0.0))
-            });
+            let grid = GridFormulaBuilder::try_new(self.graph)?.build_explained()?;
+            if matches!(grid.expr, Expr::None) {
+                return Ok(Explained {
+                    expr: Expr::None,
+                    explanation: Explanation::silent_with_parts(
+                        ExplanationKind::NoTelemetryZero,
+                        "No meter reports, and the grid formula has no reading \
+                         either, so the graph gives nothing to measure the site \
+                         with and the consumption is None.",
+                        Vec::new(),
+                        vec![grid.explanation],
+                    ),
+                });
+            }
+            return Ok(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "The site has no meter, so there is nothing to measure it \
+                 with and the consumption is 0.0.",
+            ));
         };
+        let mut expr = summed_readings.expr;
+        let mut parts = vec![summed_readings.explanation];
 
         // A summed meter reads everything below it, non-consumer chains
         // included, so those have to come back out — the same subtraction
@@ -144,8 +203,21 @@ where
             &summed,
         )? {
             expr = expr - term.expr;
+            parts.push(term.explanation);
         }
 
-        Ok(Formula::new(expr.max(Expr::number(0.0))))
+        Ok(Explained::compose(
+            expr,
+            ExplanationKind::NonConsumerSubtraction,
+            "The summed readings minus the non-consumer chains they cover \
+             (producers and storage): what remains is the site's consumption.",
+            parts,
+        )
+        .wrap(
+            |expr| expr.max(Expr::number(0.0)),
+            ExplanationKind::ConsumerClamp,
+            "Consumption cannot be negative. MAX(_, 0.0) discards any \
+             production measured on the same lines.",
+        ))
     }
 }
