@@ -3,9 +3,12 @@
 
 //! This module contains the methods for generating producer formulas.
 
+use std::collections::BTreeMap;
+
 use super::super::expr::Expr;
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
+use crate::graph::formulas::explain::{Explained, ExplanationKind, pluralized, sum_explained};
 use crate::graph::formulas::fallback::{SourcePreference, aggregate_terms};
 use crate::{ComponentGraph, Edge, Error, Node};
 
@@ -33,6 +36,11 @@ where
     /// turbines and steam boilers have per-category formulas of their own
     /// and are not part of this sum.
     pub fn build(self) -> Result<Formula, Error> {
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
         // One aggregation over the component set, so a component fed
         // through two meters — or shared between two PV meters — is
         // measured once. Per-meter aggregation counted such feeds twice
@@ -43,17 +51,47 @@ where
             petgraph::Direction::Outgoing,
             false,
         )?;
-        let mut expr = None;
-        for term in aggregate_terms(self.graph, targets, SourcePreference::ComponentsFirst)? {
-            let term = term.expr.min(Expr::number(0.0));
-            expr = match expr {
-                None => Some(term),
-                Some(e) => Some(e + term),
-            };
+        let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+        for &component_id in &targets {
+            *counts
+                .entry(self.graph.component(component_id)?.category().label())
+                .or_default() += 1;
         }
-        Ok(expr
-            .map(Formula::new)
-            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
+        let mut terms = Vec::new();
+        for term in aggregate_terms(self.graph, targets, SourcePreference::ComponentsFirst)? {
+            // A silent term carries no expression to clamp, and MIN(_, 0.0)
+            // over Expr::None would hand it the 0.0 instead.
+            terms.push(match term.expr {
+                Expr::None => term,
+                _ => term.wrap(
+                    |expr| expr.min(Expr::number(0.0)),
+                    ExplanationKind::ProducerClamp,
+                    "Producers feed power in, which is negative by the passive \
+                     sign convention. MIN(_, 0.0) discards any consumption \
+                     measured on the same lines, so only production is counted.",
+                ),
+            });
+        }
+        let count_list = counts
+            .iter()
+            .map(|(label, &count)| pluralized(count, label))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(sum_explained(
+            terms,
+            ExplanationKind::TermSum,
+            format!(
+                "The total production: the sum of the site's producer \
+                 measurement points ({count_list})."
+            ),
+        )
+        .unwrap_or_else(|| {
+            Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "The graph has no PV or CHP components, so production is 0.0.",
+            )
+        }))
     }
 }
 
