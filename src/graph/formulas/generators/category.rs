@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use crate::graph::formulas::Formula;
+use crate::graph::formulas::explain::{Explained, ExplanationKind};
 use crate::graph::formulas::expr::Expr;
 use crate::graph::formulas::fallback::{SourcePreference, aggregate};
 use crate::{ComponentGraph, Edge, Error, Node};
@@ -32,6 +33,23 @@ where
     N: Node,
     E: Edge,
 {
+    Ok(Formula::new(
+        category_formula_explained(graph, ids, is_category, category, prefer_meters)?.expr,
+    ))
+}
+
+/// Like [`category_formula`], but also explains each formula part.
+pub(crate) fn category_formula_explained<N, E>(
+    graph: &ComponentGraph<N, E>,
+    ids: Option<BTreeSet<u64>>,
+    is_category: impl Fn(&N) -> bool,
+    category: &str,
+    prefer_meters: bool,
+) -> Result<Explained, Error>
+where
+    N: Node,
+    E: Edge,
+{
     let ids = match ids {
         Some(ids) => ids,
         None => graph.find_all(
@@ -43,7 +61,11 @@ where
     };
 
     if ids.is_empty() {
-        return Ok(Formula::new(Expr::number(0.0)));
+        return Ok(Explained::leaf(
+            Expr::number(0.0),
+            ExplanationKind::DefaultZero,
+            format!("No component that is {category} is included, so the formula is 0.0."),
+        ));
     }
 
     for id in &ids {
@@ -55,7 +77,6 @@ where
     }
 
     aggregate(graph, ids, SourcePreference::prefer_meters(prefer_meters))
-        .map(|explained| Formula::new(explained.expr))
 }
 
 /// Per-category wiring tests: each public `*_formula` method passes its own

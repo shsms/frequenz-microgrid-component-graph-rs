@@ -1926,6 +1926,26 @@ fn test_no_telemetry_children_meter_stays_total() -> Result<(), Error> {
     // Meter #2's reading is the only source for PV:3, but the term must not
     // go null with it.
     assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, 0.0)");
+    // The excluded child is recorded as a silent part naming the cause.
+    let explained = super::super::generators::category::category_formula_explained(
+        &graph,
+        None,
+        crate::component_category::CategoryPredicates::is_pv_inverter,
+        "a PV inverter",
+        false,
+    )?;
+    let note = find_kind(&explained.explanation, &|kind| {
+        kind == &ExplanationKind::NoTelemetryZero
+    })
+    .expect("silent note for PV:3");
+    assert_eq!(note.component_ids, vec![pv_no_telemetry.component_id()]);
+    assert_eq!(note.rendered(), None);
+    assert_eq!(
+        note.rationale,
+        "Child PV inverter #3 is in control-only mode and provides no \
+         telemetry: it has no reading to add, so the child sums leave it \
+         out. The meter's own reading still covers its flow."
+    );
     Ok(())
 }
 
@@ -1995,6 +2015,21 @@ fn test_no_telemetry_meterless_component_dropped() -> Result<(), Error> {
 
     let graph = builder.build(None)?;
     assert_eq!(graph.pv_formula(None)?.to_string(), "0.0");
+    // The `0.0` names no component, so the node must carry the id itself:
+    // without it the component vanishes from the explanation tree.
+    let explained = super::super::generators::category::category_formula_explained(
+        &graph,
+        None,
+        crate::component_category::CategoryPredicates::is_pv_inverter,
+        "a PV inverter",
+        false,
+    )?;
+    let note = find_kind(&explained.explanation, &|kind| {
+        kind == &ExplanationKind::NoTelemetryZero
+    })
+    .expect("no-telemetry note for PV:1");
+    assert_eq!(note.component_ids, vec![pv_no_telemetry.component_id()]);
+    assert_eq!(note.rendered().as_deref(), Some("0.0"));
     Ok(())
 }
 
