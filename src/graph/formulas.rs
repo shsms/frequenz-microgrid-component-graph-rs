@@ -11,6 +11,7 @@ use crate::Error;
 use crate::Node;
 use crate::component_category::CategoryPredicates;
 
+mod explain;
 mod expr;
 mod fallback;
 mod formula;

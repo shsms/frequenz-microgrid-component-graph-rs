@@ -12,4 +12,14 @@ path = "src/lib.rs"
 
 [dependencies]
 petgraph = "0.6.5"
+serde = { version = "1", features = ["derive"], optional = true }
 tracing = "0.1.40"
+
+[features]
+serde = ["dep:serde"]
+# The explained-formula API: `*_formula_explained()`, `ExplainedFormula`,
+# `Explanation`, `ExplanationKind`, `FormulaAst`, and `Formula::ast()`.
+explain = []
+
+[dev-dependencies]
+serde_json = "1"

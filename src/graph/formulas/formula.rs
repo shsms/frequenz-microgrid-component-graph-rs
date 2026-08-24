@@ -83,6 +83,14 @@ impl From<Formula> for String {
     }
 }
 
+/// Serializes as the formula string, matching `Display`.
+#[cfg(feature = "serde")]
+impl serde::Serialize for Formula {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Formula;

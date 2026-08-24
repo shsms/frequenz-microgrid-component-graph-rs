@@ -24,5 +24,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Run tests
+      # Two runs: the default (no-feature) configuration is what dependents
+      # get and has its own `#[cfg(not(feature = "explain"))]` code, while
+      # `--all-features` is the only run that compiles the feature-gated
+      # tests in. Neither run covers the other.
+      - name: Run tests (default features)
         uses: frequenz-floss/gh-action-cargo-test@v1.0.0
+
+      - name: Run tests (all features)
+        uses: frequenz-floss/gh-action-cargo-test@v1.0.0
+        with:
+          cargo-test-parameters: --all-features

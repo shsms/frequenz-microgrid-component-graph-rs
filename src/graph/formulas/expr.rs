@@ -243,6 +243,55 @@ impl Expr {
     }
 }
 
+/// Inspection helpers for `Expr`.
+impl Expr {
+    /// Collects the ids of all components referenced in the expression, in
+    /// order of appearance (duplicates included).
+    pub(crate) fn component_ids(&self) -> Vec<u64> {
+        let mut ids = Vec::new();
+        self.collect_component_ids(&mut ids);
+        ids
+    }
+
+    /// Whether the expression resolves to a value whatever the component
+    /// readings are: a constant, or a chain that ends in one. A component
+    /// reference can be missing, and the arithmetic operators propagate a
+    /// missing operand, so only a `COALESCE` with a resolving parameter
+    /// recovers from one.
+    ///
+    /// Rationales that promise a total term ("a 0.0 keeps the sum total")
+    /// are true only of an expression this holds for.
+    pub(crate) fn always_resolves(&self) -> bool {
+        match self {
+            Self::None | Self::Component { .. } => false,
+            Self::Number { .. } => true,
+            Self::Neg { param } => param.always_resolves(),
+            Self::Coalesce { params } => params.iter().any(Self::always_resolves),
+            Self::Add { params }
+            | Self::Sub { params }
+            | Self::Min { params }
+            | Self::Max { params } => params.iter().all(Self::always_resolves),
+        }
+    }
+
+    fn collect_component_ids(&self, ids: &mut Vec<u64>) {
+        match self {
+            Self::None | Self::Number { .. } => {}
+            Self::Component { component_id } => ids.push(*component_id),
+            Self::Neg { param } => param.collect_component_ids(ids),
+            Self::Add { params }
+            | Self::Sub { params }
+            | Self::Coalesce { params }
+            | Self::Min { params }
+            | Self::Max { params } => {
+                for param in params {
+                    param.collect_component_ids(ids);
+                }
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.render())
@@ -323,6 +372,40 @@ mod tests {
     fn assert_expr(exprs: &[Expr], expected: &str) {
         for expr in exprs {
             assert_eq!(expr.to_string(), expected);
+        }
+    }
+
+    /// A term resolves whatever the readings are only when a constant backs
+    /// it: `COALESCE` recovers a missing operand, the arithmetic operators
+    /// propagate it.
+    #[test]
+    fn test_always_resolves() {
+        let comp = Expr::component;
+        let number = Expr::number;
+        let coalesce = |a: Expr, b: Expr| a.coalesce(b);
+
+        for expr in [
+            number(0.0),
+            coalesce(comp(1), number(0.0)),
+            coalesce(comp(1), number(0.0)) + coalesce(comp(2), number(0.0)),
+            -coalesce(comp(1), number(0.0)),
+            coalesce(comp(1), comp(2)).coalesce(number(0.0)),
+            number(0.0).min(number(1.0)),
+        ] {
+            assert!(expr.always_resolves(), "expected total: {expr}");
+        }
+
+        for expr in [
+            Expr::None,
+            comp(1),
+            coalesce(comp(1), comp(2)),
+            // One bare reading is enough to make the whole sum missable.
+            comp(1) + coalesce(comp(2), number(0.0)),
+            comp(1) - number(0.0),
+            -comp(1),
+            number(0.0).min(comp(1)),
+        ] {
+            assert!(!expr.always_resolves(), "expected missable: {expr}");
         }
     }
 
