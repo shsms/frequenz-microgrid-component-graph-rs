@@ -6,6 +6,7 @@
 use crate::component_category::CategoryPredicates;
 use std::collections::BTreeSet;
 
+use crate::graph::formulas::explain::Explained;
 use crate::{ComponentGraph, Edge, Error, Node, graph::formulas::Formula};
 
 use super::battery::BatteryFormulaBuilder;
@@ -58,6 +59,11 @@ where
     /// A component that provides no telemetry is skipped. When no component
     /// provides telemetry, the formula is `None`.
     pub fn build(self) -> Result<Formula, Error> {
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
         let mut meters: BTreeSet<u64> = BTreeSet::new();
 
         for inv_id in &self.inverter_ids {
@@ -67,12 +73,15 @@ where
                 }
             }
         }
-        let coalesced = super::coalesce_with_telemetry(
+        super::coalesce_with_telemetry(
             self.graph,
             meters.into_iter().chain(self.inverter_ids),
-        )?;
-
-        Ok(Formula::new(coalesced))
+            "A non-aggregating metric (like voltage or frequency) is the same \
+             for the whole battery group, so summing makes no sense. The \
+             formula takes the first reporting source: the battery meters \
+             first, then the battery inverters; sources without telemetry are \
+             left out.",
+        )
     }
 }
 
@@ -80,6 +89,7 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
+    use crate::graph::formulas::explain::ExplanationKind;
     use crate::{
         ComponentCategory, ComponentGraphConfig, Error, InverterType, OperationalMode,
         graph::test_utils::ComponentGraphBuilder,
@@ -264,6 +274,23 @@ mod tests {
         assert_eq!(
             graph.battery_ac_coalesce_formula(None)?.to_string(),
             "COALESCE(#2, #3)",
+        );
+        // The dropped inverter is recorded as a silent part naming the cause.
+        let explained =
+            super::BatteryAcCoalesceFormulaBuilder::try_new(&graph, None)?.build_explained()?;
+        let chain = &explained.explanation;
+        let silent = chain
+            .children
+            .iter()
+            .find(|child| child.component_ids == [4])
+            .expect("silent node for #4");
+        assert_eq!(silent.kind, ExplanationKind::NoTelemetryZero);
+        assert_eq!(silent.rendered(), None);
+        assert_eq!(
+            silent.rationale,
+            "Battery inverter #4 is in control-only mode and provides no \
+             telemetry, so it cannot serve as a source and is left out of the \
+             chain."
         );
         Ok(())
     }

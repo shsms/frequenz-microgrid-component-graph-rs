@@ -55,7 +55,6 @@ use super::explain::{Explained, ExplanationKind, capitalized, sum_explained};
 use super::expr::Expr;
 pub(crate) use emit::diamond_term;
 use emit::{measure, subtraction_term};
-pub(super) use predicates::ids_with_telemetry;
 pub(crate) use predicates::{
     is_grid_meter, parent_meters, reached_only_through, reaches_any_below,
 };

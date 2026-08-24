@@ -5,6 +5,7 @@
 
 use crate::component_category::CategoryPredicates;
 use crate::graph::formulas::Formula;
+use crate::graph::formulas::explain::Explained;
 use crate::{ComponentGraph, Edge, Error, Node};
 
 pub(crate) struct GridCoalesceFormulaBuilder<'a, N, E>
@@ -36,6 +37,11 @@ where
     /// A component that provides no telemetry is skipped. When no component
     /// provides telemetry, the formula is `None`.
     pub fn build(self) -> Result<Formula, Error> {
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
         let ids = self
             .graph
             .successors(self.graph.root_id)?
@@ -47,9 +53,15 @@ where
             .map(|node| node.component_id())
             .collect::<Vec<_>>();
 
-        Ok(Formula::new(super::coalesce_with_telemetry(
-            self.graph, ids,
-        )?))
+        super::coalesce_with_telemetry(
+            self.graph,
+            ids,
+            "A non-aggregating metric (like voltage or frequency) is the same \
+             on every line at the grid connection point, so summing makes no \
+             sense. The formula takes the first reporting source among the \
+             meters and inverters directly connected to the grid; sources \
+             without telemetry are left out.",
+        )
     }
 }
 
