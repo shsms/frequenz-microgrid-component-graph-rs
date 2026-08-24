@@ -100,7 +100,7 @@ where
             targets,
             SourcePreference::MetersFirst { by_config: false },
         )? {
-            expr = expr - term;
+            expr = expr - term.expr;
         }
 
         Ok(Formula::new(expr.max(Expr::number(0.0))))
@@ -143,7 +143,7 @@ where
             SourcePreference::MetersFirst { by_config: false },
             &summed,
         )? {
-            expr = expr - term;
+            expr = expr - term.expr;
         }
 
         Ok(Formula::new(expr.max(Expr::number(0.0))))

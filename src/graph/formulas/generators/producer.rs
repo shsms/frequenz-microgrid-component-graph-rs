@@ -45,7 +45,7 @@ where
         )?;
         let mut expr = None;
         for term in aggregate_terms(self.graph, targets, SourcePreference::ComponentsFirst)? {
-            let term = term.min(Expr::number(0.0));
+            let term = term.expr.min(Expr::number(0.0));
             expr = match expr {
                 None => Some(term),
                 Some(e) => Some(e + term),

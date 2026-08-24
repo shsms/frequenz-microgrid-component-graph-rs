@@ -48,11 +48,13 @@ mod tests;
 
 use std::collections::BTreeSet;
 
+use crate::component_category::CategoryPredicates;
 use crate::{ComponentGraph, Edge, Error, Node};
 
+use super::explain::{Explained, ExplanationKind, capitalized, sum_explained};
 use super::expr::Expr;
 pub(crate) use emit::diamond_term;
-use emit::{measure, subtraction_term, sum};
+use emit::{measure, subtraction_term};
 pub(super) use predicates::ids_with_telemetry;
 pub(crate) use predicates::{
     is_grid_meter, parent_meters, reached_only_through, reaches_any_below,
@@ -117,9 +119,14 @@ pub(crate) fn aggregate<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: BTreeSet<u64>,
     policy: SourcePreference,
-) -> Result<Expr, Error> {
-    sum(aggregate_terms(graph, targets, policy)?)
-        .ok_or(Error::internal("No components to generate formula."))
+) -> Result<Explained, Error> {
+    sum_explained(
+        aggregate_terms(graph, targets, policy)?,
+        ExplanationKind::TermSum,
+        "One term per measurement point. The points do not overlap, so \
+         summing them counts every component exactly once.",
+    )
+    .ok_or(Error::internal("No components to generate formula."))
 }
 
 /// The per-group measurement terms for `targets`: one [`Expr`] per measurement
@@ -132,7 +139,7 @@ pub(crate) fn aggregate_terms<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     targets: BTreeSet<u64>,
     policy: SourcePreference,
-) -> Result<Vec<Expr>, Error> {
+) -> Result<Vec<Explained>, Error> {
     aggregate_terms_avoiding(graph, targets, policy, &BTreeSet::new())
 }
 
@@ -157,34 +164,70 @@ pub(crate) fn aggregate_terms_avoiding<N: Node, E: Edge>(
     targets: BTreeSet<u64>,
     policy: SourcePreference,
     off_limits: &BTreeSet<u64>,
-) -> Result<Vec<Expr>, Error> {
+) -> Result<Vec<Explained>, Error> {
     if graph.config.disable_fallback_components {
         // Without fallback, each target is measured by its own reading; a target
         // that provides no telemetry has no reading to emit, so it is dropped.
-        let mut terms: Vec<Expr> = ids_with_telemetry(graph, targets.iter().copied())?
-            .into_iter()
-            .map(Expr::component)
-            .collect();
+        // A silent part records each dropped target (its expression vanishes
+        // from any sum); the silent parts follow the emitting terms.
+        let mut terms: Vec<Explained> = Vec::new();
+        let mut dropped: Vec<Explained> = Vec::new();
+        for &id in &targets {
+            let component = graph.component(id)?;
+            if !component.provides_telemetry() {
+                dropped.push(Explained::silent(
+                    ExplanationKind::NoTelemetryZero,
+                    format!(
+                        "{} #{id} {} and provides no telemetry. It has no \
+                         reading to emit, so it is dropped.",
+                        capitalized(component.category().label()),
+                        component.operational_mode().describe(),
+                    ),
+                    vec![id],
+                ));
+                continue;
+            }
+            let label = component.category().label();
+            terms.push(
+                Explained::leaf(
+                    Expr::component(id),
+                    ExplanationKind::FallbacksDisabled,
+                    format!(
+                        "Fallbacks are disabled by config, so {label} #{id} is \
+                         measured by its bare reading only."
+                    ),
+                )
+                .each(format!(
+                    "Fallbacks are disabled by config, so each of the {{n}} \
+                     {label}s is measured by its bare reading only."
+                )),
+            );
+        }
         // If every target was dropped for lack of telemetry, keep the term total
         // with a 0.0. A genuinely empty target set stays empty, as before.
         if terms.is_empty() && !targets.is_empty() {
-            terms.push(Expr::number(0.0));
+            terms.push(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "Every target was dropped for lack of telemetry; 0.0 keeps the \
+                 term total.",
+            ));
         }
+        terms.extend(dropped);
         Ok(terms)
     } else {
         measurement_points(graph, &targets, off_limits)?
             .into_iter()
             .map(|point| match point {
-                Measurement::Single(id) => measure(graph, id, policy).map(|term| term.expr),
+                Measurement::Single(id) => measure(graph, id, policy),
                 Measurement::Diamond { components, meters } => {
-                    diamond_term(graph, &components, &meters, policy).map(|term| term.expr)
+                    diamond_term(graph, &components, &meters, policy)
                 }
                 Measurement::Subtraction {
                     parent_meters,
                     subtracted,
                     components,
-                } => subtraction_term(graph, &parent_meters, &subtracted, &components, policy)
-                    .map(|term| term.expr),
+                } => subtraction_term(graph, &parent_meters, &subtracted, &components, policy),
             })
             .collect()
     }

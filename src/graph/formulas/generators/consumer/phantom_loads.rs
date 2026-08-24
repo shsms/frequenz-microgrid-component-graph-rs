@@ -140,6 +140,7 @@ where
                         BTreeSet::from([successor.0]),
                         SourcePreference::MetersFirst { by_config: false },
                     )?
+                    .expr
                 } else if successor.1.provides_telemetry() {
                     Expr::from(successor.1)
                 } else {

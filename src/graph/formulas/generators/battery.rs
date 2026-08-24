@@ -60,7 +60,7 @@ where
             self.inverter_ids.clone(),
             SourcePreference::prefer_meters(self.graph.config.prefer_meters_in_battery_formula()),
         )
-        .map(Formula::new)
+        .map(|explained| Formula::new(explained.expr))
     }
 
     pub(super) fn find_inverter_ids(

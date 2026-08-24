@@ -47,11 +47,14 @@ where
         let mut expr = None;
         for group in self.feed_groups()? {
             let term = match group.as_slice() {
-                [feed] => aggregate(
-                    self.graph,
-                    BTreeSet::from([*feed]),
-                    SourcePreference::MetersFirstWithChains,
-                )?,
+                [feed] => {
+                    aggregate(
+                        self.graph,
+                        BTreeSet::from([*feed]),
+                        SourcePreference::MetersFirstWithChains,
+                    )?
+                    .expr
+                }
                 meters => {
                     let mut components = BTreeSet::new();
                     for &meter in meters {

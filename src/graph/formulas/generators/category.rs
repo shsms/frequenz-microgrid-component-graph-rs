@@ -54,7 +54,8 @@ where
         }
     }
 
-    aggregate(graph, ids, SourcePreference::prefer_meters(prefer_meters)).map(Formula::new)
+    aggregate(graph, ids, SourcePreference::prefer_meters(prefer_meters))
+        .map(|explained| Formula::new(explained.expr))
 }
 
 /// Per-category wiring tests: each public `*_formula` method passes its own

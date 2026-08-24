@@ -5,9 +5,18 @@
 
 use std::collections::BTreeSet;
 
+use super::super::explain::{Explanation, ExplanationKind};
 use super::{SourcePreference, aggregate};
 use crate::graph::test_utils::ComponentGraphBuilder;
 use crate::{ComponentCategory, ComponentGraphConfig, Error, InverterType, OperationalMode};
+
+/// The first node (pre-order) whose kind satisfies `pred`, if any.
+fn find_kind<'a>(
+    node: &'a Explanation,
+    pred: &impl Fn(&ExplanationKind) -> bool,
+) -> Option<&'a Explanation> {
+    node.nodes().into_iter().find(|node| pred(&node.kind))
+}
 
 /// Test fallback expression generation when there are no meters in the
 /// graph, with only PV inverters directly connected to the grid.
@@ -633,14 +642,52 @@ fn test_child_meter_diamond_stays_bare() -> Result<(), Error> {
     // inverter (#6) would subtract its reading twice when the meters are
     // offline. The sum of bare readings is safe: each meter measures its
     // own feed line.
+    let explained = aggregate(
+        &graph,
+        BTreeSet::from([mixed_meter.component_id()]),
+        SourcePreference::MetersFirst { by_config: false },
+    )?;
     assert_eq!(
-        aggregate(
-            &graph,
-            BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst { by_config: false },
-        )?
-        .to_string(),
+        explained.to_string(),
         "COALESCE(#2, #5 + #4 + COALESCE(#3, 0.0))",
+    );
+    // Those bare readings carry no fallback of their own, so neither the
+    // children's sum nor the whole term is total. Both reasons must say so
+    // instead of promising a 0.0 that is not there, and the sum's kind must
+    // say it too: `BestEffortSum` would promise in machine-readable form
+    // exactly what its own rationale denies.
+    assert!(
+        find_kind(&explained.explanation, &|kind| matches!(
+            kind,
+            ExplanationKind::BestEffortSum
+        ))
+        .is_none(),
+        "a sum that can go missing must not be labelled best-effort",
+    );
+    assert_eq!(
+        find_kind(&explained.explanation, &|kind| matches!(
+            kind,
+            ExplanationKind::MeterWithChildBackup
+        ))
+        .map(|node| node.rationale.as_str()),
+        Some(
+            "Meter #2 is measured by its own reading. If the reading goes \
+             missing, the sum of its usable children backs it — though not \
+             every term there carries a 0.0 fallback, so the term can still \
+             go missing."
+        ),
+    );
+    assert_eq!(
+        find_kind(&explained.explanation, &|kind| matches!(
+            kind,
+            ExplanationKind::ChildrenSum
+        ))
+        .map(|node| node.rationale.as_str()),
+        Some(
+            "The sum of the meter's usable children. Not every term carries \
+             a 0.0 fallback of its own, so the sum goes missing when a bare \
+             reading does."
+        ),
     );
     Ok(())
 }
@@ -1153,15 +1200,29 @@ fn test_children_fallback_drops_feeder_of_sibling() -> Result<(), Error> {
     let graph = builder.build(None)?;
     // No bare `#4` next to `COALESCE(#5, 0.0)`: inverter #5's reading
     // already contains the flow through meter #4.
+    let explained = aggregate(
+        &graph,
+        BTreeSet::from([mixed_meter.component_id()]),
+        SourcePreference::MetersFirst { by_config: false },
+    )?;
     assert_eq!(
-        aggregate(
-            &graph,
-            BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst { by_config: false },
-        )?
-        .to_string(),
+        explained.to_string(),
         "COALESCE(#2, COALESCE(#5, 0.0) + COALESCE(#3, 0.0))",
     );
+    // The dropped meter is recorded as a silent part naming the fed sibling.
+    let note = find_kind(&explained.explanation, &|kind| {
+        matches!(kind, ExplanationKind::ChildSkipped { .. })
+    })
+    .expect("skip note for meter #4");
+    assert_eq!(
+        note.kind,
+        ExplanationKind::ChildSkipped {
+            feeds: vec![battery_inverter.component_id()],
+            fed_from: vec![],
+        }
+    );
+    assert_eq!(note.component_ids, vec![battery_meter.component_id()]);
+    assert_eq!(note.rendered(), None);
     Ok(())
 }
 
@@ -1233,15 +1294,30 @@ fn test_children_fallback_drops_device_feeder() -> Result<(), Error> {
     ))?;
     // No child term at all: inverter #3 feeds sibling #5, and meter #5
     // is fed by #3 from outside meter #2's line.
-    assert_eq!(
-        aggregate(
-            &graph,
-            BTreeSet::from([mixed_meter.component_id()]),
-            SourcePreference::MetersFirst { by_config: false },
-        )?
-        .to_string(),
-        "#2",
-    );
+    let explained = aggregate(
+        &graph,
+        BTreeSet::from([mixed_meter.component_id()]),
+        SourcePreference::MetersFirst { by_config: false },
+    )?;
+    assert_eq!(explained.to_string(), "#2");
+    // Both skips are recorded, each naming its counterpart: the feeder
+    // names the fed sibling, the fed meter names its outside feed.
+    let feeder = find_kind(&explained.explanation, &|kind| {
+        kind == &ExplanationKind::ChildSkipped {
+            feeds: vec![sub_meter.component_id()],
+            fed_from: vec![],
+        }
+    })
+    .expect("skip note for inverter #3");
+    assert_eq!(feeder.component_ids, vec![battery_inverter.component_id()]);
+    let fed = find_kind(&explained.explanation, &|kind| {
+        kind == &ExplanationKind::ChildSkipped {
+            feeds: vec![],
+            fed_from: vec![battery_inverter.component_id()],
+        }
+    })
+    .expect("skip note for meter #5");
+    assert_eq!(fed.component_ids, vec![sub_meter.component_id()]);
     Ok(())
 }
 
@@ -1850,6 +1926,56 @@ fn test_no_telemetry_children_meter_stays_total() -> Result<(), Error> {
     // Meter #2's reading is the only source for PV:3, but the term must not
     // go null with it.
     assert_eq!(graph.pv_formula(None)?.to_string(), "COALESCE(#2, 0.0)");
+    Ok(())
+}
+
+/// A skip note survives the components-first ladder that drops the
+/// best-effort sum (a single kept child): the drill node still records the
+/// skipped child and its outside feed.
+///
+/// Topology (ids): `Grid:0 → Meter:1 → {Meter:2, Meter:3}`, with
+/// `{Meter:2, Meter:3} → Inverter:4 → Battery:5` (a parallel feed),
+/// `Meter:2 → Inverter:6 → Battery:7`, and a load (Meter:8) under the grid
+/// meter.
+#[test]
+fn test_skip_note_survives_single_kept_child() -> Result<(), Error> {
+    let mut builder = ComponentGraphBuilder::new();
+    let grid = builder.grid();
+    let grid_meter = builder.meter();
+    builder.connect(grid, grid_meter);
+    let meter_a = builder.meter();
+    builder.connect(grid_meter, meter_a);
+    let meter_b = builder.meter();
+    builder.connect(grid_meter, meter_b);
+    let shared_inverter = builder.battery_inverter();
+    let battery = builder.battery();
+    builder.connect(meter_a, shared_inverter);
+    builder.connect(meter_b, shared_inverter);
+    builder.connect(shared_inverter, battery);
+    let own_inverter = builder.battery_inverter();
+    let own_battery = builder.battery();
+    builder.connect(meter_a, own_inverter);
+    builder.connect(own_inverter, own_battery);
+    let load_meter = builder.meter();
+    builder.connect(grid_meter, load_meter);
+
+    let graph = builder.build(None)?;
+    let explained = aggregate(
+        &graph,
+        BTreeSet::from([meter_a.component_id()]),
+        SourcePreference::ComponentsFirst,
+    )?;
+    // A single kept child (#6): the ladder is exact / meter / 0.0, with no
+    // best-effort sum — the note must not vanish with it.
+    assert_eq!(explained.to_string(), "COALESCE(#6, #2, 0.0)");
+    let note = find_kind(&explained.explanation, &|kind| {
+        kind == &ExplanationKind::ChildSkipped {
+            feeds: vec![],
+            fed_from: vec![meter_b.component_id()],
+        }
+    })
+    .expect("skip note for the parallel-fed inverter");
+    assert_eq!(note.component_ids, vec![shared_inverter.component_id()]);
     Ok(())
 }
 
