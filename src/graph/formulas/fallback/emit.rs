@@ -13,6 +13,7 @@ use super::SourcePreference;
 use super::predicates::{
     ids_with_telemetry, is_grid_meter, reached_only_through, reaches_any_below,
 };
+use crate::graph::formulas::explain::{Explained, ExplanationKind, id_list};
 
 /// The measurement expression for a single node.
 pub(super) fn measure<N: Node, E: Edge>(
@@ -197,7 +198,7 @@ pub(crate) fn diamond_term<N: Node, E: Edge>(
     components: &[u64],
     meters: &[u64],
     policy: SourcePreference,
-) -> Result<Expr, Error> {
+) -> Result<Explained, Error> {
     let empty = || Error::internal("Diamond measurement with no meters or components.");
     if components.is_empty() {
         return Err(empty());
@@ -208,7 +209,37 @@ pub(crate) fn diamond_term<N: Node, E: Edge>(
     // mode is for. Only a fully reporting meter set keeps its exact sum.
     let reporting = ids_with_telemetry(graph, meters.iter().copied())?;
     let meters_report = reporting.len() == meters.len();
-    let meter_best = best_effort_sum(&reporting);
+    let meter_best = best_effort_sum(&reporting).map(|expr| {
+        Explained::leaf(
+            expr,
+            ExplanationKind::BestEffortSum,
+            format!(
+                "The best-effort sum of the reporting meters ({}): each \
+                 reading or 0.0, so the term still resolves while any one of \
+                 them reports.",
+                id_list(&reporting)
+            ),
+        )
+    });
+    let meter_exact = || -> Result<Explained, Error> {
+        Ok(Explained::leaf(
+            exact_sum(meters).ok_or_else(empty)?,
+            ExplanationKind::ExactSum,
+            format!(
+                "The exact sum of the meters ({}). Each meter measures a \
+                 distinct feed line into the group, so their readings sum to \
+                 the group's throughput. Null unless every meter reports.",
+                id_list(meters)
+            ),
+        ))
+    };
+    let rationale = format!(
+        "Components {} form one group fed through the parallel meters {}. \
+         Each meter measures a distinct feed line, so the meter readings sum \
+         to the group's throughput.",
+        id_list(components),
+        id_list(meters)
+    );
     // A component that provides no telemetry has no reading; the meter
     // readings still measure it, so it is dropped only from the
     // component-side term. The component readings can stand in for the meter
@@ -218,23 +249,87 @@ pub(crate) fn diamond_term<N: Node, E: Edge>(
     let all_report =
         ids_with_telemetry(graph, components.iter().copied())?.len() == components.len();
     if all_report {
-        let component_sum = exact_sum(components).ok_or_else(empty)?;
+        let component_sum = Explained::leaf(
+            exact_sum(components).ok_or_else(empty)?,
+            ExplanationKind::ExactSum,
+            format!(
+                "The exact sum of the components' own readings ({}). It can \
+                 stand in for the meter sum because every component reports.",
+                id_list(components)
+            ),
+        );
         Ok(match meter_best {
             Some(meter_best) if policy.meters_first() && meters_report => {
-                let meter_sum = exact_sum(meters).ok_or_else(empty)?;
-                meter_sum.coalesce(component_sum).coalesce(meter_best)
+                let meter_sum = meter_exact()?;
+                Explained::compose(
+                    meter_sum
+                        .expr
+                        .coalesce(component_sum.expr)
+                        .coalesce(meter_best.expr),
+                    ExplanationKind::Diamond,
+                    rationale,
+                    vec![
+                        meter_sum.explanation,
+                        component_sum.explanation,
+                        meter_best.explanation,
+                    ],
+                )
             }
-            Some(meter_best) => component_sum.coalesce(meter_best),
-            None => component_sum,
+            Some(meter_best) => Explained::compose(
+                component_sum.expr.coalesce(meter_best.expr),
+                ExplanationKind::Diamond,
+                rationale,
+                vec![component_sum.explanation, meter_best.explanation],
+            ),
+            None => Explained::compose(
+                component_sum.expr,
+                ExplanationKind::Diamond,
+                format!(
+                    "{rationale} No meter reports, so no meter-side term could \
+                     ever resolve; the components' own readings are the whole \
+                     term."
+                ),
+                vec![component_sum.explanation],
+            ),
         })
     } else if meters_report {
-        Ok(exact_sum(meters)
-            .ok_or_else(empty)?
-            .coalesce(meter_best.ok_or_else(empty)?))
+        let meter_sum = meter_exact()?;
+        let meter_best = meter_best.ok_or_else(empty)?;
+        Ok(Explained::compose(
+            meter_sum.expr.coalesce(meter_best.expr),
+            ExplanationKind::Diamond,
+            format!(
+                "{rationale} Some components provide no telemetry, so the \
+                 component readings would undercount the group; only the \
+                 meters measure the group total."
+            ),
+            vec![meter_sum.explanation, meter_best.explanation],
+        ))
     } else {
         // Neither a full meter sum nor a full component sum exists; the
         // reporting meters' best effort is the most the formula can say.
-        Ok(meter_best.unwrap_or(Expr::None))
+        Ok(match meter_best {
+            Some(meter_best) => Explained::compose(
+                meter_best.expr,
+                ExplanationKind::Diamond,
+                format!(
+                    "{rationale} Some components and some meters provide no \
+                     telemetry, so neither side has a sum that covers the \
+                     group; the reporting meters' best effort is the most the \
+                     formula can say."
+                ),
+                vec![meter_best.explanation],
+            ),
+            None => Explained::silent(
+                ExplanationKind::NoTelemetryZero,
+                format!(
+                    "{rationale} Neither the meters nor every component \
+                     reports, so nothing here can resolve: a term would \
+                     assert a reading the group does not have."
+                ),
+                components.iter().chain(meters).copied().collect(),
+            ),
+        })
     }
 }
 

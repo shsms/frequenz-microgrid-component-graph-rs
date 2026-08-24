@@ -64,6 +64,7 @@ where
                         meters,
                         SourcePreference::MetersFirstWithChains,
                     )?
+                    .expr
                 }
             };
             expr = match expr {

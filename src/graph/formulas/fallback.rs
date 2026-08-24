@@ -177,7 +177,7 @@ pub(crate) fn aggregate_terms_avoiding<N: Node, E: Edge>(
             .map(|point| match point {
                 Measurement::Single(id) => measure(graph, id, policy),
                 Measurement::Diamond { components, meters } => {
-                    diamond_term(graph, &components, &meters, policy)
+                    diamond_term(graph, &components, &meters, policy).map(|term| term.expr)
                 }
                 Measurement::Subtraction {
                     parent_meters,
