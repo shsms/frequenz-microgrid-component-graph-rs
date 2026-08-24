@@ -352,7 +352,7 @@ pub(super) fn subtraction_term<N: Node, E: Edge>(
     subtracted: &[u64],
     components: &[u64],
     policy: SourcePreference,
-) -> Result<Expr, Error> {
+) -> Result<Explained, Error> {
     let empty = || Error::internal("Subtraction measurement with no components.");
     let no_meters = || Error::internal("Subtraction measurement with no parent meters.");
     if components.is_empty() {
@@ -361,9 +361,31 @@ pub(super) fn subtraction_term<N: Node, E: Edge>(
     // Several parallel parent meters (a diamond) sum to the group's throughput;
     // a single meter is just that sum of one.
     let meter_sum = exact_sum(parent_meters).ok_or_else(no_meters)?;
-    let difference = subtracted
-        .iter()
-        .fold(meter_sum, |expr, &m| expr - Expr::component(m));
+    let difference = Explained::leaf(
+        subtracted
+            .iter()
+            .fold(meter_sum, |expr, &m| expr - Expr::component(m)),
+        ExplanationKind::MeterDifference {
+            meters: parent_meters.to_vec(),
+            subtracted: subtracted.to_vec(),
+        },
+        format!(
+            "The parent meter(s) {} minus the sibling readings {}: everything \
+             through the parents except what the siblings account for, which \
+             is exactly this group. The siblings are subtracted by their bare \
+             readings — a COALESCE(_, 0.0) there would attribute a missing \
+             sibling's power to the group.",
+            id_list(parent_meters),
+            id_list(subtracted)
+        ),
+    );
+    let rationale = format!(
+        "Components {} share parent meter(s) {} with other children ({}), so \
+         the group is measured as the parents minus those siblings.",
+        id_list(components),
+        id_list(parent_meters),
+        id_list(subtracted)
+    );
     // A component that provides no telemetry has no reading; the difference
     // still measures it, so it is dropped only from the component-side terms.
     // The exact component sum can be the primary source only when every
@@ -372,21 +394,66 @@ pub(super) fn subtraction_term<N: Node, E: Edge>(
     // readings.
     let telemetry_components = ids_with_telemetry(graph, components.iter().copied())?;
     let all_report = telemetry_components.len() == components.len();
-    let best = best_effort_sum(&telemetry_components);
+    let best = best_effort_sum(&telemetry_components).map(|expr| {
+        Explained::leaf(
+            expr,
+            ExplanationKind::BestEffortSum,
+            format!(
+                "The best-effort sum of the components' readings ({}): each \
+                 reading or 0.0, so the term always resolves.",
+                id_list(&telemetry_components)
+            ),
+        )
+    });
     if policy.meters_first() || !all_report {
         // When no component reports, the difference has no component-reading
         // backstop; fall back to 0.0 so the term stays total when the parent
         // meters are missing too.
-        Ok(difference.coalesce(best.unwrap_or_else(|| Expr::number(0.0))))
+        let backstop = best.unwrap_or_else(|| {
+            Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "No component reports, so 0.0 keeps the term total when the \
+                 parent meters are missing too.",
+            )
+        });
+        Ok(Explained::compose(
+            difference.expr.coalesce(backstop.expr),
+            ExplanationKind::Subtraction,
+            rationale,
+            vec![difference.explanation, backstop.explanation],
+        ))
     } else {
-        let exact = exact_sum(&telemetry_components).ok_or_else(empty)?;
+        let exact = Explained::leaf(
+            exact_sum(&telemetry_components).ok_or_else(empty)?,
+            ExplanationKind::ExactSum,
+            "The components' own readings are the primary source. This sum is \
+             null unless every component reports.",
+        );
         let best = best.ok_or_else(empty)?;
         let last_resort = if components.len() > 1 {
             best
         } else {
-            Expr::number(0.0)
+            Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "The last-resort 0.0 keeps the term total when both the \
+                 component and the parent meter readings are missing.",
+            )
         };
-        Ok(exact.coalesce(difference).coalesce(last_resort))
+        Ok(Explained::compose(
+            exact
+                .expr
+                .coalesce(difference.expr)
+                .coalesce(last_resort.expr),
+            ExplanationKind::Subtraction,
+            rationale,
+            vec![
+                exact.explanation,
+                difference.explanation,
+                last_resort.explanation,
+            ],
+        ))
     }
 }
 

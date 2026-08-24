@@ -183,7 +183,8 @@ pub(crate) fn aggregate_terms_avoiding<N: Node, E: Edge>(
                     parent_meters,
                     subtracted,
                     components,
-                } => subtraction_term(graph, &parent_meters, &subtracted, &components, policy),
+                } => subtraction_term(graph, &parent_meters, &subtracted, &components, policy)
+                    .map(|term| term.expr),
             })
             .collect()
     }
