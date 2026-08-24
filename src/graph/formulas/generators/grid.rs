@@ -10,6 +10,7 @@ use crate::{
     ComponentGraph, Edge, Error, Node,
     graph::formulas::{
         Formula,
+        explain::{Explained, ExplanationKind, sum_explained},
         expr::Expr,
         fallback::{SourcePreference, aggregate, diamond_term, is_grid_meter},
     },
@@ -44,17 +45,19 @@ where
     /// A per-feed term would have no backing, and a feed whose meter
     /// reports nothing would count as zero flow.
     pub fn build(self) -> Result<Formula, Error> {
-        let mut expr = None;
+        Ok(Formula::new(self.build_explained()?.expr))
+    }
+
+    /// Like [`Self::build`], but also explains each formula part.
+    pub fn build_explained(self) -> Result<Explained, Error> {
+        let mut terms = Vec::new();
         for group in self.feed_groups()? {
-            let term = match group.as_slice() {
-                [feed] => {
-                    aggregate(
-                        self.graph,
-                        BTreeSet::from([*feed]),
-                        SourcePreference::MetersFirstWithChains,
-                    )?
-                    .expr
-                }
+            terms.push(match group.as_slice() {
+                [feed] => aggregate(
+                    self.graph,
+                    BTreeSet::from([*feed]),
+                    SourcePreference::MetersFirstWithChains,
+                )?,
                 meters => {
                     let mut components = BTreeSet::new();
                     for &meter in meters {
@@ -67,17 +70,26 @@ where
                         meters,
                         SourcePreference::MetersFirstWithChains,
                     )?
-                    .expr
                 }
-            };
-            expr = match expr {
-                None => Some(term),
-                Some(e) => Some(term + e),
-            };
+            });
         }
-        Ok(expr
-            .map(Formula::new)
-            .unwrap_or_else(|| Formula::new(Expr::number(0.0))))
+        // Successors iterate in reverse insertion order; the sum is built in
+        // insertion order.
+        terms.reverse();
+        Ok(sum_explained(
+            terms,
+            ExplanationKind::TermSum,
+            "The sum of everything connected to the grid connection point, \
+             one term per connection.",
+        )
+        .unwrap_or_else(|| {
+            Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "Nothing is connected to the grid connection point, so the \
+                 formula is 0.0.",
+            )
+        }))
     }
 
     /// The grid's feeds, with parallel feeds over shared components
@@ -315,6 +327,48 @@ mod tests {
             "PowerTransformer #2 must not appear in grid_formula, got {formula:?}",
         );
         assert_eq!(formula, "COALESCE(#1, #3, 0.0)");
+        Ok(())
+    }
+
+    /// A no-telemetry grid meter with nothing below it to read: every child
+    /// is control-only, so no child sum is left and the term is null. The
+    /// excluded children are still recorded — the meter's silent node
+    /// carries one silent part per child.
+    ///
+    /// Topology (ids): `Grid:0 → GridMeter:1 (control-only) → {CHP:2, PV:3}
+    /// (both control-only)`.
+    #[test]
+    fn test_no_telemetry_grid_meter_records_children() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter =
+            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::ControlOnly);
+        builder.connect(grid, grid_meter);
+        let chp =
+            builder.add_component_with_mode(ComponentCategory::Chp, OperationalMode::ControlOnly);
+        builder.connect(grid_meter, chp);
+        let pv = builder.add_component_with_mode(
+            ComponentCategory::Inverter(crate::InverterType::Pv),
+            OperationalMode::ControlOnly,
+        );
+        builder.connect(grid_meter, pv);
+
+        let graph = builder.build(None)?;
+        assert_eq!(graph.grid_formula()?.to_string(), "None");
+
+        // A single silent term: the sum collapses to the meter's own node.
+        let explained = GridFormulaBuilder::try_new(&graph)?.build_explained()?;
+        let meter_node = &explained.explanation;
+        assert_eq!(meter_node.kind, ExplanationKind::NoTelemetryZero);
+        assert_eq!(meter_node.rendered(), None);
+        assert_eq!(meter_node.component_ids, vec![1, 2, 3]);
+        assert_eq!(meter_node.children.len(), 2);
+        // Successors iterate in reverse insertion order: PV:3, then CHP:2.
+        for (child, id) in meter_node.children.iter().zip([3u64, 2]) {
+            assert_eq!(child.kind, ExplanationKind::NoTelemetryZero);
+            assert_eq!(child.component_ids, vec![id]);
+            assert_eq!(child.rendered(), None);
+        }
         Ok(())
     }
 
