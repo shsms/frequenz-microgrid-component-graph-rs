@@ -127,6 +127,39 @@ impl Display for ComponentCategory {
 }
 
 impl ComponentCategory {
+    /// A human-readable label for explanation prose, e.g. "PV inverter".
+    ///
+    /// Lower-case except for acronyms; capitalize the first letter when it
+    /// starts a sentence.
+    pub(crate) fn label(self) -> &'static str {
+        use ComponentCategory as C;
+        match self {
+            C::Unspecified => "component",
+            C::GridConnectionPoint => "grid connection point",
+            C::Meter => "meter",
+            C::Inverter(InverterType::Pv) => "PV inverter",
+            C::Inverter(InverterType::Battery) => "battery inverter",
+            C::Inverter(InverterType::Hybrid) => "hybrid inverter",
+            C::Inverter(InverterType::Unspecified) => "inverter",
+            C::Battery(_) => "battery",
+            C::EvCharger(_) => "EV charger",
+            C::Chp => "CHP",
+            C::WindTurbine => "wind turbine",
+            C::SteamBoiler => "steam boiler",
+            C::Converter => "converter",
+            C::Breaker => "breaker",
+            C::Precharger => "precharger",
+            C::Electrolyzer => "electrolyzer",
+            C::PowerTransformer => "power transformer",
+            C::Hvac => "HVAC unit",
+            C::Plc => "PLC",
+            C::CryptoMiner => "crypto miner",
+            C::StaticTransferSwitch => "static transfer switch",
+            C::UninterruptiblePowerSupply => "UPS",
+            C::CapacitorBank => "capacitor bank",
+        }
+    }
+
     /// Returns `true` if this category is a *pass-through*: a component
     /// that has no specific handling in the graph and should be treated
     /// as transparent by validators and formula generators.

@@ -52,6 +52,18 @@ impl OperationalMode {
             OperationalMode::Inactive | OperationalMode::ControlOnly => false,
         }
     }
+
+    /// How the mode reads in explanation prose, as a predicate phrase:
+    /// "meter #4 is inactive", "inverter #7 is in control-only mode".
+    pub(crate) fn describe(self) -> &'static str {
+        match self {
+            OperationalMode::Unspecified => "has an unspecified operational mode",
+            OperationalMode::Inactive => "is inactive",
+            OperationalMode::TelemetryOnly => "is in telemetry-only mode",
+            OperationalMode::ControlOnly => "is in control-only mode",
+            OperationalMode::ControlAndTelemetry => "is in control-and-telemetry mode",
+        }
+    }
 }
 
 impl Display for OperationalMode {

@@ -11,6 +11,27 @@ where
     N: Node,
     E: Edge,
 {
+    /// The meter's role as a label for explanation prose: "PV meter",
+    /// "battery meter", ..., or plain "meter" when no single role fits
+    /// (a grid meter, or a meter over mixed successors).
+    pub(crate) fn meter_role_label(&self, component_id: u64) -> Result<&'static str, Error> {
+        Ok(if self.is_pv_meter(component_id)? {
+            "PV meter"
+        } else if self.is_battery_meter(component_id)? {
+            "battery meter"
+        } else if self.is_ev_charger_meter(component_id)? {
+            "EV charger meter"
+        } else if self.is_chp_meter(component_id)? {
+            "CHP meter"
+        } else if self.is_wind_turbine_meter(component_id)? {
+            "wind turbine meter"
+        } else if self.is_steam_boiler_meter(component_id)? {
+            "steam boiler meter"
+        } else {
+            "meter"
+        })
+    }
+
     /// Returns true if the node is a PV meter.
     ///
     /// A meter is identified as a PV meter if:
@@ -421,13 +442,13 @@ mod tests {
         let (components, connections) = nodes_and_edges();
         assert_eq!(
             find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
-            vec![],
+            Vec::<u64>::new(),
         );
 
         let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
             find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
-            vec![],
+            Vec::<u64>::new(),
         );
 
         let (components, connections) = without_grid_meters();
