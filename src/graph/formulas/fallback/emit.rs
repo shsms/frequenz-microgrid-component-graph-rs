@@ -2,6 +2,9 @@
 // Copyright © 2024 Frequenz Energy-as-a-Service GmbH
 
 //! Builds the measurement expression for each resolved point.
+//!
+//! Each function returns an [`Explained`]: the expression plus the tree of
+//! reasons for its parts, captured from the branch that emitted them.
 
 use std::collections::BTreeSet;
 
@@ -11,27 +14,64 @@ use crate::{ComponentGraph, Edge, Error, Node};
 
 use super::SourcePreference;
 use super::predicates::{
-    ids_with_telemetry, is_grid_meter, reached_only_through, reaches_any_below,
+    ids_with_telemetry, is_grid_meter, outside_feeds, reached_below, reached_only_through,
 };
-use crate::graph::formulas::explain::{Explained, ExplanationKind, id_list};
+use crate::graph::formulas::explain::{
+    Explained, Explanation, ExplanationKind, capitalized, id_list,
+};
 
 /// The measurement expression for a single node.
 pub(super) fn measure<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     id: u64,
     policy: SourcePreference,
-) -> Result<Expr, Error> {
+) -> Result<Explained, Error> {
     let own = Expr::component(id);
     let component = graph.component(id)?;
     if !component.is_meter() {
         // A component measured directly: its own reading, or 0. A component
         // that provides no telemetry has no reading to emit, so it
         // contributes 0.
+        let label = component.category().label();
         if !component.provides_telemetry() {
-            return Ok(Expr::number(0.0));
+            return Ok(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::NoTelemetryZero,
+                format!(
+                    "{} #{id} {} and provides no telemetry: it has no \
+                     reading, so it contributes 0.0.",
+                    capitalized(label),
+                    component.operational_mode().describe(),
+                ),
+            )
+            .covering([id])
+            .each(format!(
+                "Each of the {{n}} {label}s provides no telemetry: it has no \
+                 reading, so it contributes 0.0."
+            )));
         }
-        return Ok(own.coalesce(Expr::number(0.0)));
+        return Ok(Explained::leaf(
+            own.coalesce(Expr::number(0.0)),
+            ExplanationKind::DirectReading,
+            format!(
+                "{} #{id} is measured by its own reading. \
+                 The 0.0 fallback keeps the term total when the reading is missing.",
+                capitalized(label),
+            ),
+        )
+        .each(format!(
+            "Each of the {{n}} {label}s is measured by its own reading; the \
+             0.0 fallback keeps each term total when its reading is missing."
+        )));
     }
+    // Asked once: several branches below turn on it, and it names the meter
+    // in every reason they write. A grid meter is never a component meter,
+    // so it has no role of its own to lose by being named for this one.
+    let grid_meter = is_grid_meter(graph, component)?;
+    let label = match grid_meter {
+        true => "grid meter",
+        false => graph.meter_role_label(id)?,
+    };
     let children: Vec<&N> = graph.successors(id)?.collect();
     // A child that provides no telemetry has no reading to emit: it is
     // dropped from every child sum; the meter term itself covers it. A
@@ -53,6 +93,10 @@ pub(super) fn measure<N: Node, E: Edge>(
     // — an accepted undercount in that unusual wiring, and only in the
     // fallback.
     let mut contributing: Vec<&N> = Vec::new();
+    // The skipped children end up as silent parts on the meter's own node,
+    // so they survive every branch below — also the ones that drop the
+    // children sum.
+    let mut skipped: Vec<Explanation> = Vec::new();
     for child in children.iter().copied() {
         if child.provides_telemetry()
             || (child.is_meter()
@@ -64,6 +108,26 @@ pub(super) fn measure<N: Node, E: Edge>(
                 )?)
         {
             contributing.push(child);
+        } else {
+            // Left out of every child sum, but not lost: the meter's own
+            // reading still covers its flow, and a silent part records why
+            // it adds no term of its own.
+            let child_id = child.component_id();
+            let covered = match component.provides_telemetry() {
+                true => " The meter's own reading still covers its flow.",
+                false => "",
+            };
+            skipped.push(Explanation::silent(
+                ExplanationKind::NoTelemetryZero,
+                format!(
+                    "Child {} #{child_id} {} and provides no telemetry: it \
+                     has no reading to add, so the child sums leave it \
+                     out.{covered}",
+                    child.category().label(),
+                    child.operational_mode().describe(),
+                ),
+                vec![child_id],
+            ));
         }
     }
     let contributing_ids: BTreeSet<u64> = contributing.iter().map(|c| c.component_id()).collect();
@@ -71,9 +135,51 @@ pub(super) fn measure<N: Node, E: Edge>(
     let mut kept: Vec<&N> = Vec::new();
     for child in &contributing {
         let child_id = child.component_id();
-        if !reaches_any_below(graph, child_id, &contributing_ids)?
-            && reached_only_through(graph, child_id, &meters)?
-        {
+        let child_label = child.category().label();
+        let feeds = reached_below(graph, child_id, &contributing_ids)?;
+        if !feeds.is_empty() {
+            let (sibling, carrier) = match feeds.len() {
+                1 => ("sibling", "its reading"),
+                _ => ("siblings", "their readings"),
+            };
+            let rationale = format!(
+                "Child {child_label} #{child_id} feeds {sibling} {} of the \
+                 same parent; {carrier} already carr{} this child's flow, \
+                 so even a bare reading would count that line twice. It is \
+                 left out of the sum.",
+                id_list(&feeds),
+                match feeds.len() {
+                    1 => "ies",
+                    _ => "y",
+                },
+            );
+            skipped.push(Explanation::silent(
+                ExplanationKind::ChildSkipped {
+                    feeds,
+                    fed_from: vec![],
+                },
+                rationale,
+                vec![child_id],
+            ));
+            continue;
+        }
+        let fed_from = outside_feeds(graph, child_id, &meters)?;
+        if !fed_from.is_empty() {
+            let rationale = format!(
+                "Child {child_label} #{child_id} is also fed from outside \
+                 meter #{id} (through {}), so its reading holds more than \
+                 this meter passes. It is left out of the sum.",
+                id_list(&fed_from),
+            );
+            skipped.push(Explanation::silent(
+                ExplanationKind::ChildSkipped {
+                    feeds: vec![],
+                    fed_from,
+                },
+                rationale,
+                vec![child_id],
+            ));
+        } else {
             kept.push(child);
         }
     }
@@ -84,71 +190,251 @@ pub(super) fn measure<N: Node, E: Edge>(
         // read through it alone cover its feed the same way the
         // consumer's summed meters do, missing unmodeled loads on the
         // silent segment and anything fed around it.
-        // With nothing to descend to, a grid meter's term is null (there
-        // is no reading at all, and a fabricated 0.0 would assert one);
-        // an internal meter's keeps the 0.0 its callers already expect.
-        let mut terms = kept
-            .iter()
-            .map(|c| child_best_effort_term(graph, c, policy))
-            .collect::<Result<Vec<_>, _>>()?;
-        // A child term that resolves to no reading — a plain 0.0 or a
-        // null — backs nothing. It is dropped, so a descent that finds
-        // no readings falls through instead of summing fabricated zeros.
-        terms.retain(|term| !matches!(term, Expr::None) && *term != Expr::number(0.0));
-        return Ok(sum(terms).unwrap_or_else(|| {
-            if is_grid_meter(graph, component).unwrap_or(false) {
-                Expr::None
-            } else {
-                Expr::number(0.0)
-            }
-        }));
+        let (summed, mut child_parts) = best_effort_children(graph, &kept, policy, true)?;
+        if summed.is_none() && grid_meter {
+            // No child read through it alone has a reading either, so there
+            // is no reading at all: a 0.0 would assert one, so the term is
+            // null.
+            child_parts.extend(skipped);
+            return Ok(Explained {
+                expr: Expr::None,
+                explanation: Explanation::silent_with_parts(
+                    ExplanationKind::NoTelemetryZero,
+                    format!(
+                        "Grid meter #{id} {} and provides no telemetry, and no \
+                         child read through it alone has a reading its term \
+                         could use. It emits no term: a 0.0 would assert a \
+                         reading that does not exist.",
+                        component.operational_mode().describe(),
+                    ),
+                    vec![id],
+                    child_parts,
+                ),
+            });
+        }
+        // An internal meter's term keeps the 0.0 its callers already expect.
+        let Explained { expr, explanation } = match summed {
+            Some(expr) => children_sum(expr, child_parts),
+            None => Explained {
+                expr: Expr::number(0.0),
+                explanation: Explanation::new(
+                    ExplanationKind::DefaultZero,
+                    "No child adds a term of its own, so 0.0 keeps the term total.",
+                    &Expr::number(0.0),
+                    child_parts,
+                ),
+            },
+        };
+        let mut parts = vec![explanation];
+        parts.extend(skipped);
+        return Ok(Explained::compose(
+            expr,
+            ExplanationKind::NoTelemetryMeterDrill,
+            format!(
+                "{} #{id} {} and provides no telemetry, so its own reading \
+                 must never appear. It is measured by the sum of its children \
+                 instead.",
+                capitalized(label),
+                component.operational_mode().describe(),
+            ),
+            parts,
+        ));
     }
+    let meter_reading = |rationale: String| {
+        Explained::leaf(
+            Expr::component(id),
+            ExplanationKind::MeterReading,
+            rationale,
+        )
+    };
+    // One binding for both branches below: the renderer treats equal
+    // rationale text as one shared reason, printed once for a folded run.
+    let only_source_reading = || {
+        meter_reading(String::from(
+            "The meter's own reading is the primary source: it is the \
+             only source that covers its whole group.",
+        ))
+    };
     let standing = stands_alone(graph, id, policy)?;
-    // A grid meter stays bare — it carries the site's unmodeled consumer
-    // load, which no sum of its children accounts for.
-    if standing && is_grid_meter(graph, component)? {
-        return Ok(own);
+    // A grid meter whose own reading is the only primary source stays bare:
+    // it carries the site's unmodeled consumer load, which no sum of its
+    // children accounts for. One that drills into a chain is a different
+    // case — there the chain, not a child sum, backs the reading.
+    if standing && grid_meter {
+        return Ok(Explained::compose(
+            own,
+            ExplanationKind::BareGridMeter,
+            format!(
+                "Grid meter #{id} is measured by its bare reading. Its own \
+                 reading is the only source here, and it also carries the \
+                 site's unmodeled consumer load, which no sum of its \
+                 children would account for, so nothing can back it."
+            ),
+            skipped,
+        ));
     }
     if kept.is_empty() {
         // A childless meter stays bare, and so does one whose children were
         // all excluded to avoid a double count. When there are children but
         // none contribute, a 0.0 keeps the term total where their
         // best-effort sum otherwise would.
-        // A grid meter stays bare either way: a 0.0 fallback would
-        // assert a reading when its own is the only one there is.
-        return Ok(
-            if !children.is_empty() && contributing.is_empty() && !is_grid_meter(graph, component)?
-            {
-                own.coalesce(Expr::number(0.0))
-            } else {
-                own
-            },
-        );
+        if children.is_empty() {
+            return Ok(Explained::leaf(
+                own,
+                ExplanationKind::BareMeter,
+                format!(
+                    "{} #{id} has no children, so it is measured by its bare reading.",
+                    capitalized(label),
+                ),
+            ));
+        }
+        if contributing.is_empty() {
+            // A grid meter stays bare either way: a 0.0 fallback would
+            // assert a reading when its own is the only one there is.
+            if grid_meter {
+                return Ok(Explained::compose(
+                    own,
+                    ExplanationKind::BareGridMeter,
+                    format!(
+                        "Grid meter #{id} is measured by its bare reading. No \
+                         child provides a usable reading, so a 0.0 fallback \
+                         would assert one where its own is the only reading \
+                         there is."
+                    ),
+                    skipped,
+                ));
+            }
+            let reading = only_source_reading();
+            let mut parts = vec![
+                reading.explanation,
+                Explanation::new(
+                    ExplanationKind::DefaultZero,
+                    "No child adds a term of its own, so 0.0 stands in for their sum.",
+                    &Expr::number(0.0),
+                    Vec::new(),
+                ),
+            ];
+            parts.extend(skipped);
+            return Ok(Explained::compose(
+                own.coalesce(Expr::number(0.0)),
+                ExplanationKind::MeterWithChildBackup,
+                format!(
+                    "{} #{id} is measured by its own reading. No child \
+                     provides a usable reading, so a 0.0 keeps the term total \
+                     where the children's best-effort sum otherwise would.",
+                    capitalized(label),
+                ),
+                parts,
+            ));
+        }
+        return Ok(Explained::compose(
+            own,
+            ExplanationKind::BareMeter,
+            format!(
+                "{} #{id} is measured by its bare reading: every child was \
+                 left out of the fallback to avoid counting flow twice.",
+                capitalized(label),
+            ),
+            skipped,
+        ));
     }
     let empty = || Error::internal("Meter children sum is empty.");
-    // `best` sums each kept child's reading-or-0 (child meters resolve
-    // recursively, backed by their own children), so it resolves whenever
-    // anything beneath it reports. A meter only drills when every child
-    // provides telemetry (see [`stands_alone`]).
-    let terms = kept
-        .iter()
-        .map(|c| child_best_effort_term(graph, c, policy))
-        .collect::<Result<Vec<_>, _>>()?;
-    let best = sum(terms).ok_or_else(empty)?;
+    // The best-effort sum of the kept children: only they can back (or stand
+    // in for) the meter reading; each kept child's reading-or-0 (child meters
+    // resolve recursively, backed by their own children), so it resolves
+    // whenever anything beneath it reports. A meter only drills when every
+    // child provides telemetry (see [`stands_alone`]).
+    let (summed, parts) = best_effort_children(graph, &kept, policy, false)?;
+    let best = summed
+        .map(|expr| children_sum(expr, parts))
+        .ok_or_else(empty)?;
     if standing {
         // Standing alone means the meter's own reading is the only primary
-        // source. It does not mean the term may go null when that reading is
-        // missing: the children's best-effort sum still backs it, so the term
-        // stays total.
-        return Ok(own.coalesce(best));
+        // source. It does not mean the term goes null when that reading is
+        // missing: the children's sum still backs it — and keeps the term
+        // total whenever every one of its own terms resolves.
+        let reading = only_source_reading();
+        let mut parts = vec![reading.explanation, best.explanation];
+        parts.extend(skipped);
+        let backup = match best.expr.always_resolves() {
+            true => "the best-effort sum of its usable children keeps the term total.",
+            false => {
+                "the sum of its usable children backs it — though not every \
+                 term there carries a 0.0 fallback, so the term can still go \
+                 missing."
+            }
+        };
+        return Ok(Explained::compose(
+            own.coalesce(best.expr),
+            ExplanationKind::MeterWithChildBackup,
+            format!(
+                "{} #{id} is measured by its own reading. If the reading \
+                 goes missing, {backup}",
+                capitalized(label),
+            ),
+            parts,
+        ));
     }
 
+    let kept_ids: Vec<u64> = kept.iter().map(|c| c.component_id()).collect();
+    // The identity sentence opens the group's rationale and doubles as its
+    // member reason: when a run of groups folds expanded, each member keeps
+    // exactly this line while the shared prose prints once for the run.
+    let identity = format!(
+        "{} #{id} measures exactly this group ({}).",
+        capitalized(label),
+        id_list(&kept_ids),
+    );
+    let each = format!(
+        "Each of the {{n}} {label} groups below is measured the same way, \
+         from the same sources in this order; each term's own comment lists \
+         its group."
+    );
     if policy.meters_first() {
-        Ok(own.coalesce(best))
+        let reading = meter_reading(String::from(
+            "The meter's own reading is the primary source: it measures \
+             all of its children together.",
+        ));
+        let mut parts = vec![reading.explanation, best.explanation];
+        parts.extend(skipped);
+        Ok(Explained::compose(
+            own.coalesce(best.expr),
+            ExplanationKind::MeterDrill {
+                prefers_meters: true,
+            },
+            format!(
+                "{identity} Meters are preferred{}, so its reading comes \
+                 first; {} is the fallback.",
+                match policy.meters_first_by_config() {
+                    true => " by config",
+                    false => "",
+                },
+                // One kept child is measured on its own — there is no sum
+                // for it to be summed into.
+                match kept.len() {
+                    1 => "its child",
+                    _ => "the sum of its children",
+                },
+            ),
+            parts,
+        )
+        .each(each)
+        .member(identity))
     } else {
         // `exact` is null unless every kept child reports.
         let exact =
             sum(kept.iter().map(|c| Expr::component(c.component_id()))).ok_or_else(empty)?;
+        let exact = Explained::leaf(
+            exact,
+            ExplanationKind::ExactSum,
+            "The children's own readings, summed exactly: null unless every \
+             child reports, so a missing reading moves on to the fallback \
+             instead of silently undercounting.",
+        );
+        let reading = meter_reading(String::from(
+            "The group's meter measures the same components together, so \
+             its reading can stand in when a child reading is missing.",
+        ));
         // The last resort after `exact` and the meter:
         // - multiple kept children: `best`, the per-child reading-or-0 sum;
         // - a single kept device child: a plain 0 (`best` would just repeat
@@ -160,13 +446,126 @@ pub(super) fn measure<N: Node, E: Edge>(
         //   instead of drilling here. Kept so the ladder stays right if that
         //   ever changes.)
         let last_resort = if kept.len() > 1 {
-            best
+            Some(best)
         } else if kept[0].is_meter() {
-            Expr::None
+            None
         } else {
-            Expr::number(0.0)
+            Some(Explained::leaf(
+                Expr::number(0.0),
+                ExplanationKind::DefaultZero,
+                "The last-resort 0.0 keeps the term total when both the child \
+                 and the meter readings are missing.",
+            ))
         };
-        Ok(exact.coalesce(own).coalesce(last_resort))
+        let mut expr = exact.expr.coalesce(reading.expr);
+        let mut parts = vec![exact.explanation, reading.explanation];
+        if let Some(last_resort) = last_resort {
+            expr = expr.coalesce(last_resort.expr);
+            parts.push(last_resort.explanation);
+        }
+        parts.extend(skipped);
+        Ok(Explained::compose(
+            expr,
+            ExplanationKind::MeterDrill {
+                prefers_meters: false,
+            },
+            format!(
+                "{identity} Component readings are preferred, so their \
+                 exact sum comes first; the meter reading is the fallback."
+            ),
+            parts,
+        )
+        .each(each)
+        .member(identity))
+    }
+}
+
+/// The children's best-effort terms, and their explanations in the same
+/// order. The expression is `None` when no term is left to sum.
+///
+/// `drop_dead` leaves out a term that resolves to no reading — a plain 0.0 or
+/// a null — recording it as a silent part instead, so a descent that finds no
+/// readings falls through rather than summing fabricated zeros. Only a meter
+/// measured *by* this sum needs that; one merely backed by it keeps the 0.0
+/// its callers already expect.
+fn best_effort_children<N: Node, E: Edge>(
+    graph: &ComponentGraph<N, E>,
+    kept: &[&N],
+    policy: SourcePreference,
+    drop_dead: bool,
+) -> Result<(Option<Expr>, Vec<Explanation>), Error> {
+    // Decided here and nowhere else: this is the only place that knows how
+    // many children the sum will hold, and it is the same count
+    // `children_sum` collapses on. Deriving it per child, or passing it in
+    // from a caller, is how the reasons drift away from the tree they
+    // describe.
+    let company = match kept.len() {
+        1 => TermCompany::Alone,
+        _ => TermCompany::WithSiblings,
+    };
+    let mut terms = Vec::new();
+    let mut parts = Vec::new();
+    for child in kept {
+        let term = child_best_effort_term(graph, child, policy, company)?;
+        if drop_dead && (matches!(term.expr, Expr::None) || term.expr == Expr::number(0.0)) {
+            let child_id = child.component_id();
+            parts.push(Explanation::silent_with_parts(
+                ExplanationKind::NoTelemetryZero,
+                format!(
+                    "Child {} #{child_id} resolves to no reading of its \
+                     own, so it backs nothing and the sum leaves it out.",
+                    child.category().label(),
+                ),
+                vec![child_id],
+                vec![term.explanation],
+            ));
+            continue;
+        }
+        terms.push(term.expr);
+        parts.push(term.explanation);
+    }
+    Ok((sum(terms), parts))
+}
+
+/// The children's sum as one explained term. A sum of a single part is the
+/// part itself: a node above it would carry the same expression and the same
+/// components, saying only "the sum of this one thing". [`sum_explained`]
+/// drops the extra node for the same reason.
+fn children_sum(expr: Expr, parts: Vec<Explanation>) -> Explained {
+    match <[Explanation; 1]>::try_from(parts) {
+        Ok([only]) => Explained {
+            expr,
+            explanation: only,
+        },
+        Err(parts) => {
+            let (kind, rationale) = children_sum_kind(&expr);
+            Explained::compose(expr, kind, rationale, parts)
+        }
+    }
+}
+
+/// How to label a meter's children sum, which is best-effort only when every
+/// term carries its own fallback. A child summed by its bare reading — one
+/// fed around its meter, or a recursed meter with no fallback of its own —
+/// has none, so the sum goes missing with that reading and must not claim
+/// otherwise.
+///
+/// The kind and the rationale are chosen together, from one reading of the
+/// expression, so the machine-readable label cannot promise what the prose
+/// denies.
+fn children_sum_kind(expr: &Expr) -> (ExplanationKind, &'static str) {
+    match expr.always_resolves() {
+        true => (
+            ExplanationKind::BestEffortSum,
+            "The best-effort sum of the meter's usable children: each reading \
+             or 0.0, so it still resolves when only part of the group reports.",
+        ),
+        false => (
+            ExplanationKind::ChildrenSum,
+            "The sum of the meter's usable children. Not every term carries a \
+             0.0 fallback of its own, so the sum goes missing when a bare \
+             reading does.",
+        ),
     }
 }
 
@@ -477,6 +876,24 @@ enum ChildTerm {
     Recurse,
 }
 
+/// Whether a child's term stands as the whole fallback or joins its siblings
+/// in a sum. It decides only how the term's reason is worded — a lone term
+/// must not describe a sum or a group that is not there, because
+/// [`children_sum`] drops the sum node when there is only one part.
+///
+/// Set in exactly one place, [`best_effort_children`], from the same child
+/// count [`children_sum`] collapses on. Keep it that way: a second site
+/// deciding this is how a reason ends up describing a shape the tree does
+/// not have.
+#[derive(Clone, Copy)]
+enum TermCompany {
+    /// The only kept child. Its term is the fallback itself, with no sum
+    /// around it.
+    Alone,
+    /// One of several kept children, summed together.
+    WithSiblings,
+}
+
 /// Decides a child's [`ChildTerm`] for its parent meter's children fallback
 /// sum.
 fn child_term_kind<N: Node, E: Edge>(
@@ -498,15 +915,57 @@ fn child_term_kind<N: Node, E: Edge>(
 
 /// A child's contribution to a meter's `best` sum; one term per
 /// [`ChildTerm`] decision.
+///
+/// `company` only picks the wording: every reason here must describe the
+/// shape the term actually lands in, and a [`TermCompany::Alone`] term lands
+/// as the fallback itself, with no sum and no group around it. The plural
+/// phrasings set by `each` are exempt — the renderer prints one only for a
+/// folded run of two or more, where a sum is always there to talk about.
 fn child_best_effort_term<N: Node, E: Edge>(
     graph: &ComponentGraph<N, E>,
     child: &N,
     policy: SourcePreference,
-) -> Result<Expr, Error> {
+    company: TermCompany,
+) -> Result<Explained, Error> {
     let id = child.component_id();
     Ok(match child_term_kind(graph, child)? {
-        ChildTerm::ReadingOr0 => Expr::coalesce(Expr::component(id), Expr::number(0.0)),
-        ChildTerm::Bare => Expr::component(id),
+        ChildTerm::ReadingOr0 => Explained::leaf(
+            Expr::coalesce(Expr::component(id), Expr::number(0.0)),
+            ExplanationKind::DirectReading,
+            match company {
+                TermCompany::Alone => format!(
+                    "Child {} #{id}'s reading. The 0.0 fallback keeps the \
+                     term total when the device is offline.",
+                    child.category().label(),
+                ),
+                TermCompany::WithSiblings => format!(
+                    "Child {} #{id}'s reading. The 0.0 fallback keeps the sum \
+                     total when the device is offline, so one silent child \
+                     does not null the whole group.",
+                    child.category().label(),
+                ),
+            },
+        )
+        .each(format!(
+            "Each of the {{n}} child {}s adds its reading, with a 0.0 \
+             fallback so one offline device does not null the whole sum.",
+            child.category().label(),
+        )),
+        ChildTerm::Bare => Explained::leaf(
+            Expr::component(id),
+            ExplanationKind::BareMeter,
+            format!(
+                "Child {} #{id}'s bare reading. Its children are also \
+                 fed around it, so recursing into it would count the \
+                 shared components once per feed; the bare reading is \
+                 safe to {}.",
+                graph.meter_role_label(id)?,
+                match company {
+                    TermCompany::Alone => "stand as the term",
+                    TermCompany::WithSiblings => "sum",
+                },
+            ),
+        ),
         ChildTerm::Recurse => measure(graph, id, policy)?,
     })
 }

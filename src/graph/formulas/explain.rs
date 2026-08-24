@@ -315,6 +315,17 @@ impl Explained {
         self
     }
 
+    /// Adds components the explanation covers beyond those its expression
+    /// names: for a part that stands for a component without naming it (a
+    /// no-telemetry `0.0`, say), so the component still shows up in
+    /// [`Explanation::component_ids`].
+    pub(crate) fn covering(mut self, component_ids: impl IntoIterator<Item = u64>) -> Self {
+        self.explanation.component_ids.extend(component_ids);
+        self.explanation.component_ids.sort_unstable();
+        self.explanation.component_ids.dedup();
+        self
+    }
+
     /// A part that emits no expression (its expression is [`Expr::None`],
     /// which vanishes from any sum): it records a component that is left
     /// out on purpose, and why.

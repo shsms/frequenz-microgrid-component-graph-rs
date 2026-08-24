@@ -175,7 +175,7 @@ pub(crate) fn aggregate_terms_avoiding<N: Node, E: Edge>(
         measurement_points(graph, &targets, off_limits)?
             .into_iter()
             .map(|point| match point {
-                Measurement::Single(id) => measure(graph, id, policy),
+                Measurement::Single(id) => measure(graph, id, policy).map(|term| term.expr),
                 Measurement::Diamond { components, meters } => {
                     diamond_term(graph, &components, &meters, policy).map(|term| term.expr)
                 }
@@ -202,5 +202,7 @@ pub(crate) fn measures_nothing<N: Node, E: Edge>(
         graph,
         id,
         SourcePreference::MetersFirst { by_config: false },
-    )? == Expr::number(0.0))
+    )?
+    .expr
+        == Expr::number(0.0))
 }
