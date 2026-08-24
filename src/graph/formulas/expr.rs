@@ -274,6 +274,15 @@ impl Expr {
         }
     }
 
+    /// Whether the expression needs brackets where the grammar is ambiguous:
+    /// as the operand of a negation, or after a binary `-`. Only an additive
+    /// expression of more than one operand qualifies; a single-term one
+    /// renders like its sole term. The single source of the grammar's
+    /// bracketing rule — `Display` and the commented renderer both use it.
+    pub(crate) fn needs_brackets(&self) -> bool {
+        matches!(self, Self::Add { params } | Self::Sub { params } if params.len() > 1)
+    }
+
     fn collect_component_ids(&self, ids: &mut Vec<u64>) {
         match self {
             Self::None | Self::Number { .. } => {}
@@ -344,13 +353,9 @@ impl Expr {
     /// Renders the expression, wrapping it in brackets when it is additive (so
     /// it can be safely placed after a `-`).
     fn render_grouped(&self) -> String {
-        match self {
-            // A single-term additive expression renders like its sole term, so
-            // it needs no brackets (matches the previous printer's behaviour).
-            Self::Add { params } | Self::Sub { params } if params.len() > 1 => {
-                format!("({})", self.render())
-            }
-            _ => self.render(),
+        match self.needs_brackets() {
+            true => format!("({})", self.render()),
+            false => self.render(),
         }
     }
 
