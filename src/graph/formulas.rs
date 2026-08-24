@@ -1524,6 +1524,69 @@ mod tests {
         Ok(())
     }
 
+    /// A run of same-shaped producer terms folds under one comment: the
+    /// shared clamp reason prints once verbatim, the per-component reason
+    /// once in its plural form, and each term stays on one line. The CHP
+    /// term has a different shape (its own category), so it is not part of
+    /// the PV run and keeps its own reasons.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_folds_same_shaped_runs() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for _ in 0..4 {
+            let pv_inverter = builder.solar_inverter();
+            builder.connect(grid_meter, pv_inverter);
+        }
+        let chp = builder.chp();
+        builder.connect(grid_meter, chp);
+
+        let graph = builder.build(None)?;
+        let explained = graph.producer_formula_explained()?;
+        let commented = explained.to_commented_string();
+
+        assert_eq!(
+            commented,
+            concat!(
+                "// producer: The power the site's producers (PV and CHP) feed in.
+",
+                "// The total production: the sum of the site's producer measurement points (1 CHP, 4 PV inverters).
+",
+                "// Producers feed power in, which is negative by the passive sign convention. MIN(_, 0.0) discards
+",
+                "// any consumption measured on the same lines, so only production is counted.
+",
+                "// Each of the 4 PV inverters is measured by its own reading; the 0.0 fallback keeps each term total
+",
+                "// when its reading is missing.
+",
+                "MIN(COALESCE(#2, 0.0), 0.0) +
+",
+                "MIN(COALESCE(#3, 0.0), 0.0) +
+",
+                "MIN(COALESCE(#4, 0.0), 0.0) +
+",
+                "MIN(COALESCE(#5, 0.0), 0.0) +
+",
+                "MIN(
+",
+                "    // CHP #6 is measured by its own reading. The 0.0 fallback keeps the term total when the reading
+",
+                "    // is missing.
+",
+                "    COALESCE(#6, 0.0),
+",
+                "    0.0
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.producer_formula()?);
+        Ok(())
+    }
+
     /// A None-valued formula still renders its body and its reason: the
     /// comments say why there is no source, and stripping them recovers the
     /// plain `None` string.
@@ -1558,6 +1621,493 @@ mod tests {
             )
         );
         assert_eq!(strip_comments(&explained.to_commented_string()), "None");
+        Ok(())
+    }
+
+    /// Two equal runs split by a different term each keep their own group
+    /// comment: the second run's members are not left uncommented, and each
+    /// count stays right.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_repeats_group_comment_for_second_run() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for _ in 0..2 {
+            let pv_inverter = builder.solar_inverter();
+            builder.connect(grid_meter, pv_inverter);
+        }
+        let chp = builder.chp();
+        builder.connect(grid_meter, chp);
+        for _ in 0..2 {
+            let pv_inverter = builder.solar_inverter();
+            builder.connect(grid_meter, pv_inverter);
+        }
+
+        let graph = builder.build(None)?;
+        let commented = graph.producer_formula_explained()?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// producer: The power the site's producers (PV and CHP) feed in.
+",
+                "// The total production: the sum of the site's producer measurement points (1 CHP, 4 PV inverters).
+",
+                "// Producers feed power in, which is negative by the passive sign convention. MIN(_, 0.0) discards
+",
+                "// any consumption measured on the same lines, so only production is counted.
+",
+                "// Each of the 2 PV inverters is measured by its own reading; the 0.0 fallback keeps each term total
+",
+                "// when its reading is missing.
+",
+                "MIN(COALESCE(#2, 0.0), 0.0) +
+",
+                "MIN(COALESCE(#3, 0.0), 0.0) +
+",
+                "MIN(
+",
+                "    // CHP #4 is measured by its own reading. The 0.0 fallback keeps the term total when the reading
+",
+                "    // is missing.
+",
+                "    COALESCE(#4, 0.0),
+",
+                "    0.0
+",
+                ") +
+",
+                "// Producers feed power in, which is negative by the passive sign convention. MIN(_, 0.0) discards
+",
+                "// any consumption measured on the same lines, so only production is counted.
+",
+                "// Each of the 2 PV inverters is measured by its own reading; the 0.0 fallback keeps each term total
+",
+                "// when its reading is missing.
+",
+                "MIN(COALESCE(#5, 0.0), 0.0) +
+",
+                "MIN(COALESCE(#6, 0.0), 0.0)",
+            )
+        );
+        assert_round_trip(&commented, &graph.producer_formula()?);
+        Ok(())
+    }
+
+    /// A run of same-shaped meter groups folds expanded: the shared ladder
+    /// prose prints once above the run, each rung's id-free reason printed
+    /// verbatim, and every group keeps a one-line identity comment over its
+    /// fully laid-out term — even though the groups' child counts differ.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_folds_meter_groups_expanded() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for count in [3, 2] {
+            let chain = builder.meter_pv_chain(count);
+            builder.connect(grid_meter, chain);
+        }
+
+        let graph = builder.build(None)?;
+        let commented = graph.pv_formula_explained(None)?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// pv: The total power of the PV inverters.
+",
+                "// One term per measurement point. The points do not overlap, so summing them counts every component
+",
+                "// exactly once.
+",
+                "// Each of the 2 PV meter groups below is measured the same way, from the same sources in this
+",
+                "// order; each term's own comment lists its group.
+",
+                "// The children's own readings, summed exactly: null unless every child reports, so a missing
+",
+                "// reading moves on to the fallback instead of silently undercounting.
+",
+                "// The group's meter measures the same components together, so its reading can stand in when a child
+",
+                "// reading is missing.
+",
+                "// The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "// when only part of the group reports.
+",
+                "// Each of the 5 child PV inverters adds its reading, with a 0.0 fallback so one offline device does
+",
+                "// not null the whole sum.
+",
+                "// PV meter #2 measures exactly this group (#5, #4, #3).
+",
+                "COALESCE(
+",
+                "    #5 + #4 + #3,
+",
+                "    #2,
+",
+                "    COALESCE(#5, 0.0) +
+",
+                "    COALESCE(#4, 0.0) +
+",
+                "    COALESCE(#3, 0.0)
+",
+                ") +
+",
+                "// PV meter #6 measures exactly this group (#8, #7).
+",
+                "COALESCE(
+",
+                "    #8 + #7,
+",
+                "    #6,
+",
+                "    COALESCE(#8, 0.0) +
+",
+                "    COALESCE(#7, 0.0)
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.pv_formula(None)?);
+        Ok(())
+    }
+
+    /// Meter groups fold expanded with meters preferred too: the shared
+    /// reading-then-children ladder prints once, one identity line per group.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_folds_meter_groups_expanded_meters_first() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for count in [3, 2] {
+            let chain = builder.meter_pv_chain(count);
+            builder.connect(grid_meter, chain);
+        }
+
+        let graph = builder.build(Some(
+            ComponentGraphConfig::builder()
+                .prefer_meters_in_component_formulas(true)
+                .build(),
+        ))?;
+        let commented = graph.pv_formula_explained(None)?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// pv: The total power of the PV inverters.
+",
+                "// One term per measurement point. The points do not overlap, so summing them counts every component
+",
+                "// exactly once.
+",
+                "// Each of the 2 PV meter groups below is measured the same way, from the same sources in this
+",
+                "// order; each term's own comment lists its group.
+",
+                "// The meter's own reading is the primary source: it measures all of its children together.
+",
+                "// The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "// when only part of the group reports.
+",
+                "// Each of the 5 child PV inverters adds its reading, with a 0.0 fallback so one offline device does
+",
+                "// not null the whole sum.
+",
+                "// PV meter #2 measures exactly this group (#5, #4, #3).
+",
+                "COALESCE(
+",
+                "    #2,
+",
+                "    COALESCE(#5, 0.0) +
+",
+                "    COALESCE(#4, 0.0) +
+",
+                "    COALESCE(#3, 0.0)
+",
+                ") +
+",
+                "// PV meter #6 measures exactly this group (#8, #7).
+",
+                "COALESCE(
+",
+                "    #6,
+",
+                "    COALESCE(#8, 0.0) +
+",
+                "    COALESCE(#7, 0.0)
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.pv_formula(None)?);
+        Ok(())
+    }
+
+    /// A term that cannot fold (a stands-alone meter with an inactive child,
+    /// which keeps its silent note) splits the surrounding meter groups into
+    /// two runs: each run repeats the shared prose for its own members, and
+    /// the odd term out keeps its full reasons.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_expanded_run_splits_around_odd_term() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for count in [3, 2] {
+            let chain = builder.meter_pv_chain(count);
+            builder.connect(grid_meter, chain);
+        }
+        let standing = builder.meter_pv_chain(2);
+        builder.connect(grid_meter, standing);
+        let inactive = builder.add_component_with_mode(
+            ComponentCategory::Inverter(InverterType::Pv),
+            OperationalMode::Inactive,
+        );
+        builder.connect(standing, inactive);
+        for count in [2, 2] {
+            let chain = builder.meter_pv_chain(count);
+            builder.connect(grid_meter, chain);
+        }
+
+        let graph = builder.build(None)?;
+        let commented = graph.pv_formula_explained(None)?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// pv: The total power of the PV inverters.
+",
+                "// One term per measurement point. The points do not overlap, so summing them counts every component
+",
+                "// exactly once.
+",
+                "// Each of the 2 PV meter groups below is measured the same way, from the same sources in this
+",
+                "// order; each term's own comment lists its group.
+",
+                "// The children's own readings, summed exactly: null unless every child reports, so a missing
+",
+                "// reading moves on to the fallback instead of silently undercounting.
+",
+                "// The group's meter measures the same components together, so its reading can stand in when a child
+",
+                "// reading is missing.
+",
+                "// The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "// when only part of the group reports.
+",
+                "// Each of the 5 child PV inverters adds its reading, with a 0.0 fallback so one offline device does
+",
+                "// not null the whole sum.
+",
+                "// PV meter #2 measures exactly this group (#5, #4, #3).
+",
+                "COALESCE(
+",
+                "    #5 + #4 + #3,
+",
+                "    #2,
+",
+                "    COALESCE(#5, 0.0) +
+",
+                "    COALESCE(#4, 0.0) +
+",
+                "    COALESCE(#3, 0.0)
+",
+                ") +
+",
+                "// PV meter #6 measures exactly this group (#8, #7).
+",
+                "COALESCE(
+",
+                "    #8 + #7,
+",
+                "    #6,
+",
+                "    COALESCE(#8, 0.0) +
+",
+                "    COALESCE(#7, 0.0)
+",
+                ") +
+",
+                "// PV meter #9 is measured by its own reading. If the reading goes missing, the best-effort sum of
+",
+                "// its usable children keeps the term total.
+",
+                "COALESCE(
+",
+                "    // The meter's own reading is the primary source: it is the only source that covers its whole
+",
+                "    // group.
+",
+                "    #9,
+",
+                "    // The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "    // when only part of the group reports.
+",
+                "    // Each of the 2 child PV inverters adds its reading, with a 0.0 fallback so one offline device
+",
+                "    // does not null the whole sum.
+",
+                "    COALESCE(#11, 0.0) +
+",
+                "    COALESCE(#10, 0.0)
+",
+                "    // Child PV inverter #12 is inactive and provides no telemetry: it has no reading to add, so the
+",
+                "    // child sums leave it out. The meter's own reading still covers its flow.
+",
+                ") +
+",
+                "// Each of the 2 PV meter groups below is measured the same way, from the same sources in this
+",
+                "// order; each term's own comment lists its group.
+",
+                "// The children's own readings, summed exactly: null unless every child reports, so a missing
+",
+                "// reading moves on to the fallback instead of silently undercounting.
+",
+                "// The group's meter measures the same components together, so its reading can stand in when a child
+",
+                "// reading is missing.
+",
+                "// The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "// when only part of the group reports.
+",
+                "// Each of the 4 child PV inverters adds its reading, with a 0.0 fallback so one offline device does
+",
+                "// not null the whole sum.
+",
+                "// PV meter #13 measures exactly this group (#15, #14).
+",
+                "COALESCE(
+",
+                "    #15 + #14,
+",
+                "    #13,
+",
+                "    COALESCE(#15, 0.0) +
+",
+                "    COALESCE(#14, 0.0)
+",
+                ") +
+",
+                "// PV meter #16 measures exactly this group (#18, #17).
+",
+                "COALESCE(
+",
+                "    #18 + #17,
+",
+                "    #16,
+",
+                "    COALESCE(#18, 0.0) +
+",
+                "    COALESCE(#17, 0.0)
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.pv_formula(None)?);
+        Ok(())
+    }
+
+    /// Meter groups fold expanded inside a subtraction layout too: the
+    /// shared prose prints once, each subtracted group keeps its identity
+    /// line, and the joining `-` lands on each group's closing bracket.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn test_commented_formula_folds_meter_groups_expanded_in_subtraction() -> Result<(), Error> {
+        let mut builder = ComponentGraphBuilder::new();
+        let grid = builder.grid();
+        let grid_meter = builder.meter();
+        builder.connect(grid, grid_meter);
+        for count in [3, 2] {
+            let chain = builder.meter_pv_chain(count);
+            builder.connect(grid_meter, chain);
+        }
+
+        let graph = builder.build(None)?;
+        let commented = graph.consumer_formula_explained()?.to_commented_string();
+        assert_eq!(
+            commented,
+            concat!(
+                "// consumer: The site's consumption: the power drawn by loads, excluding producers and storage.
+",
+                "// Consumption cannot be negative. MAX(_, 0.0) discards any surplus production the site feeds into
+",
+                "// the grid.
+",
+                "MAX(
+",
+                "    // The grid total minus the non-consumer groups (producers and storage): what remains is the
+",
+                "    // site's consumption.
+",
+                "    // Grid meter #1 is measured by its bare reading. Its own reading is the only source here, and
+",
+                "    // it also carries the site's unmodeled consumer load, which no sum of its children would
+",
+                "    // account for, so nothing can back it.
+",
+                "    #1 -
+",
+                "    // Each of the 2 PV meter groups below is measured the same way, from the same sources in this
+",
+                "    // order; each term's own comment lists its group.
+",
+                "    // The meter's own reading is the primary source: it measures all of its children together.
+",
+                "    // The best-effort sum of the meter's usable children: each reading or 0.0, so it still resolves
+",
+                "    // when only part of the group reports.
+",
+                "    // Each of the 5 child PV inverters adds its reading, with a 0.0 fallback so one offline device
+",
+                "    // does not null the whole sum.
+",
+                "    // PV meter #2 measures exactly this group (#5, #4, #3).
+",
+                "    COALESCE(
+",
+                "        #2,
+",
+                "        COALESCE(#5, 0.0) +
+",
+                "        COALESCE(#4, 0.0) +
+",
+                "        COALESCE(#3, 0.0)
+",
+                "    ) -
+",
+                "    // PV meter #6 measures exactly this group (#8, #7).
+",
+                "    COALESCE(
+",
+                "        #6,
+",
+                "        COALESCE(#8, 0.0) +
+",
+                "        COALESCE(#7, 0.0)
+",
+                "    ),
+",
+                "    0.0
+",
+                ")",
+            )
+        );
+        assert_round_trip(&commented, &graph.consumer_formula()?);
         Ok(())
     }
 
