@@ -267,31 +267,18 @@ mod tests {
     use crate::component_category::BatteryType;
     use crate::component_category::CategoryPredicates;
     use crate::error::Error;
-    use crate::graph::test_utils::ComponentGraphBuilder;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection, graph};
 
+    /// Components and connections are declared out of ID order, to check that
+    /// retrieval still works when the input is not sorted.
     fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let components = vec![
-            TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
-            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(3, ComponentCategory::Meter),
-            TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent::new(8, ComponentCategory::Battery(BatteryType::LiIon)),
-            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(2, ComponentCategory::Meter),
-        ];
-        let connections = vec![
-            TestConnection::new(3, 4),
-            TestConnection::new(1, 2),
-            TestConnection::new(7, 8),
-            TestConnection::new(4, 5),
-            TestConnection::new(2, 3),
-            TestConnection::new(6, 7),
-            TestConnection::new(2, 6),
-        ];
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat } },
+            1: grid => { 2: meter => { 3, 6 } },
+        };
 
-        (components, connections)
+        (g.components().to_vec(), g.connections().to_vec())
     }
 
     #[test]
@@ -400,22 +387,18 @@ mod tests {
 
     #[test]
     fn test_siblings() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        // Add a grid meter to the grid, with no successors.
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
-        assert_eq!(grid_meter.component_id(), 1);
-
-        // Add a battery chain with three inverters and two battery.
-        let meter_bat_chain = builder.meter_bat_chain(3, 2);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        assert_eq!(meter_bat_chain.component_id(), 2);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => {
+                        3: inv_bat => { 6: bat, 7: bat },
+                        4: inv_bat => { 6, 7 },
+                        5: inv_bat => { 6, 7 },
+                    },
+                },
+            },
+        }
+        .build(None)?;
         assert_eq!(
             graph
                 .siblings_from_predecessors(3)
@@ -457,16 +440,21 @@ mod tests {
             )]
         );
 
-        // Add two dangling meter to the grid meter
-        let dangling_meter = builder.meter();
-        builder.connect(grid_meter, dangling_meter);
-        assert_eq!(dangling_meter.component_id(), 8);
-
-        let dangling_meter = builder.meter();
-        builder.connect(grid_meter, dangling_meter);
-        assert_eq!(dangling_meter.component_id(), 9);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => {
+                        3: inv_bat => { 6: bat, 7: bat },
+                        4: inv_bat => { 6, 7 },
+                        5: inv_bat => { 6, 7 },
+                    },
+                    // Two dangling meters on the grid meter.
+                    8: meter,
+                    9: meter,
+                },
+            },
+        }
+        .build(None)?;
         assert_eq!(
             graph
                 .siblings_from_predecessors(8)
@@ -484,92 +472,51 @@ mod tests {
     /// `raw_predecessors` / `raw_successors` expose the graph-direct
     /// view (including pass-through nodes), while `predecessors` /
     /// `successors` walk past them.
-    ///
-    /// Topology: `Grid → PT → Meter → BatteryInverter → Battery`.
     #[test]
     fn test_raw_neighbors_includes_passthroughs() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let pt = builder.power_transformer();
-        let meter = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-
-        builder.connect(grid, pt);
-        builder.connect(pt, meter);
-        builder.connect(meter, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: transformer => { 2: meter => { 3: inv_bat => { 4: bat } } } },
+        }
+        .build(None)?;
 
         // Raw view sees the PT directly.
         let raw_preds: Vec<u64> = graph
-            .raw_predecessors(meter.component_id())?
+            .raw_predecessors(2)?
             .map(|n| n.component_id())
             .collect();
-        assert_eq!(raw_preds, vec![pt.component_id()]);
+        assert_eq!(raw_preds, vec![1]);
 
-        let raw_succs: Vec<u64> = graph
-            .raw_successors(grid.component_id())?
-            .map(|n| n.component_id())
-            .collect();
-        assert_eq!(raw_succs, vec![pt.component_id()]);
+        let raw_succs: Vec<u64> = graph.raw_successors(0)?.map(|n| n.component_id()).collect();
+        assert_eq!(raw_succs, vec![1]);
 
         // Effective view walks past the PT.
-        let preds: Vec<u64> = graph
-            .predecessors(meter.component_id())?
-            .map(|n| n.component_id())
-            .collect();
-        assert_eq!(preds, vec![grid.component_id()]);
+        let preds: Vec<u64> = graph.predecessors(2)?.map(|n| n.component_id()).collect();
+        assert_eq!(preds, vec![0]);
 
-        let succs: Vec<u64> = graph
-            .successors(grid.component_id())?
-            .map(|n| n.component_id())
-            .collect();
-        assert_eq!(succs, vec![meter.component_id()]);
+        let succs: Vec<u64> = graph.successors(0)?.map(|n| n.component_id()).collect();
+        assert_eq!(succs, vec![2]);
 
         // Unknown component_id behaves the same as the effective methods.
         assert!(graph.raw_predecessors(999).is_err());
         assert!(graph.raw_successors(999).is_err());
 
-        // Make sure the unused `battery` and `inverter` handles aren't
-        // optimised away in unrelated test setup.
-        let _ = (battery, inverter);
         Ok(())
     }
 
     /// `find_all` skips pass-through nodes when checking the predicate
     /// — even if the predicate would match. This keeps PTs out of
     /// callers' result sets without forcing them to filter.
-    ///
-    /// Topology: `Grid → PT → Meter`.
     #[test]
     fn test_find_all_skips_passthroughs() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let pt = builder.power_transformer();
-        let meter = builder.meter();
-
-        builder.connect(grid, pt);
-        builder.connect(pt, meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: transformer => { 2: meter } } }.build(None)?;
 
         // Predicate matches everything; PT is excluded from the result.
-        let found = graph.find_all(
-            grid.component_id(),
-            |_| true,
-            petgraph::Direction::Outgoing,
-            true,
-        )?;
-        assert_eq!(
-            found,
-            BTreeSet::from([grid.component_id(), meter.component_id()])
-        );
+        let found = graph.find_all(0, |_| true, petgraph::Direction::Outgoing, true)?;
+        assert_eq!(found, BTreeSet::from([0, 2]));
 
         // Predicate that explicitly tries to match PTs still returns nothing.
         let found = graph.find_all(
-            grid.component_id(),
+            0,
             |n| n.category() == ComponentCategory::PowerTransformer,
             petgraph::Direction::Outgoing,
             true,
@@ -647,53 +594,26 @@ mod tests {
     /// it. `follow_after_match = true` is the case that actually re-expands (a
     /// matched node keeps expanding), so the diamond apex and its subtree must
     /// still appear exactly once.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2}`, both `→ Inverter:3 → Battery:4`.
     #[test]
     fn test_find_all_dedups_on_diamond() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter_a = builder.meter();
-        let meter_b = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-
-        builder.connect(grid, meter_a);
-        builder.connect(grid, meter_b);
-        // The inverter is the diamond apex: reachable via both meters.
-        builder.connect(meter_a, inverter);
-        builder.connect(meter_b, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 3: inv_bat => { 4: bat } },
+                // The inverter is the diamond apex: reachable via both meters.
+                2: meter => { 3 },
+            },
+        }
+        .build(None)?;
 
         // follow_after_match = true: the inverter matches yet keeps expanding, and
         // it is reached by both meters — it and its battery must appear once each.
-        let found = graph.find_all(
-            grid.component_id(),
-            |n| !n.is_grid(),
-            petgraph::Direction::Outgoing,
-            true,
-        )?;
-        assert_eq!(
-            found,
-            BTreeSet::from([
-                meter_a.component_id(),
-                meter_b.component_id(),
-                inverter.component_id(),
-                battery.component_id(),
-            ])
-        );
+        let found = graph.find_all(0, |n| !n.is_grid(), petgraph::Direction::Outgoing, true)?;
+        assert_eq!(found, BTreeSet::from([1, 2, 3, 4]));
 
         // A predicate matching only the apex's subtree still reaches it through
         // the diamond — the apex is expanded, not skipped before its successors.
-        let found = graph.find_all(
-            grid.component_id(),
-            |n| n.is_battery(),
-            petgraph::Direction::Outgoing,
-            true,
-        )?;
-        assert_eq!(found, BTreeSet::from([battery.component_id()]));
+        let found = graph.find_all(0, |n| n.is_battery(), petgraph::Direction::Outgoing, true)?;
+        assert_eq!(found, BTreeSet::from([4]));
 
         Ok(())
     }
