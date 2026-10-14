@@ -137,57 +137,68 @@ mod tests {
     use super::*;
     use crate::ComponentCategory;
     use crate::InverterType;
-    use crate::graph::test_utils::{ComponentGraphBuilder, ComponentHandle};
-
-    fn nodes_and_edges() -> (ComponentGraphBuilder, ComponentHandle) {
-        let mut builder = ComponentGraphBuilder::new();
-
-        let grid_meter = builder.meter();
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        (builder, grid_meter)
-    }
+    use crate::graph::test_utils::{TestComponent, graph};
 
     #[test]
     fn test_component_validation() {
-        let (mut builder, grid_meter) = nodes_and_edges();
-
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+        };
         assert!(
-            builder
-                .build(None)
+            g.build(None)
                 .is_err_and(|e| e == Error::invalid_graph("No grid component found.")),
         );
 
-        let grid = builder.grid();
-        builder.connect(grid, grid_meter);
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+        };
+        assert!(g.build(None).is_ok());
 
-        assert!(builder.build(None).is_ok());
-
-        builder.add_component_with_id(2, ComponentCategory::Meter);
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+            2: meter,
+        };
         assert!(
-            builder
-                .build(None)
+            g.build(None)
                 .is_err_and(|e| e == Error::invalid_graph("Duplicate component ID found: 2"))
         );
 
-        builder.pop_component();
-        builder.add_component(ComponentCategory::Unspecified);
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+            8: unspecified,
+        };
         assert!(
-            builder.build(None).is_err_and(|e| e
+            g.build(None).is_err_and(|e| e
                 == Error::invalid_component("ComponentCategory not specified for component: 8"))
         );
 
-        builder.pop_component();
-        let unspec_inv =
-            builder.add_component(ComponentCategory::Inverter(InverterType::Unspecified));
-        builder.connect(grid_meter, unspec_inv);
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+            9: inv(Unspecified),
+            0 => { 9 },
+        };
 
         // With default config, unspecified inverter types are not accepted.
-        assert!(builder.build(None).is_err_and(
+        assert!(g.build(None).is_err_and(
             |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
         ));
         // With `allow_unspecified_inverters=true`, unspecified inverter types
@@ -196,45 +207,59 @@ mod tests {
             .allow_unspecified_inverters(true)
             .build();
 
-        assert!(builder.build(Some(unspec_inv_config.clone())).is_ok());
+        assert!(g.build(Some(unspec_inv_config.clone())).is_ok());
 
         assert!(
-            builder
-                .pop_component()
-                .unwrap()
+            TestComponent::new(9, ComponentCategory::Inverter(InverterType::Unspecified))
                 .is_battery_inverter(&unspec_inv_config)
         );
-        builder.pop_connection();
-        builder.add_component(ComponentCategory::GridConnectionPoint);
+
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+            10: grid,
+        };
         assert!(
-            builder
-                .build(None)
+            g.build(None)
                 .is_err_and(|e| e == Error::invalid_graph("Multiple grid components found."))
         );
-
-        builder.pop_component();
-        assert!(builder.build(None).is_ok());
     }
 
     #[test]
     fn test_connection_validation() {
-        let (mut builder, grid_meter) = nodes_and_edges();
-
-        let grid = builder.grid();
-        builder.connect(grid, grid_meter);
-
-        builder.connect(grid, grid);
-        assert!(builder.build(None).is_err_and(|e| e
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0, 7 },
+        };
+        assert!(g.build(None).is_err_and(|e| e
             == Error::invalid_connection(
                 "Connection:(7, 7) Can't connect a component to itself."
             )));
-        builder.pop_connection();
 
-        builder.connect(grid_meter, ComponentHandle::new(9));
-        assert!(builder.build(None).is_err_and(|e| e
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+            0 => { 9 },
+        };
+        assert!(g.build(None).is_err_and(|e| e
             == Error::invalid_connection("Connection:(0, 9) Can't find a component with ID 9")));
 
-        builder.pop_connection();
-        assert!(builder.build(None).is_ok());
+        let g = graph! {
+            0: meter => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: meter => { 5: inv_bat => { 6: bat } },
+            },
+            7: grid => { 0 },
+        };
+        assert!(g.build(None).is_ok());
     }
 }

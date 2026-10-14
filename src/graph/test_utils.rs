@@ -231,10 +231,6 @@ pub(super) use graph;
 pub(super) struct ComponentHandle(u64);
 
 impl ComponentHandle {
-    pub(super) fn new(id: u64) -> Self {
-        ComponentHandle(id)
-    }
-
     /// Returns the component ID of the component.
     pub(super) fn component_id(&self) -> u64 {
         self.0
@@ -264,17 +260,6 @@ impl ComponentGraphBuilder {
         self.add_component_with_mode(category, OperationalMode::Unspecified)
     }
 
-    /// Adds a component with the given id to the graph and returns its handle.
-    pub(super) fn add_component_with_id(
-        &mut self,
-        id: u64,
-        category: ComponentCategory,
-    ) -> ComponentHandle {
-        self.components.push(TestComponent::new(id, category));
-
-        ComponentHandle(id)
-    }
-
     /// Adds a component with the given operational mode to the graph and returns
     /// its handle.
     pub(super) fn add_component_with_mode(
@@ -287,16 +272,6 @@ impl ComponentGraphBuilder {
         self.components.push(TestComponent(id, category, mode));
 
         ComponentHandle(id)
-    }
-
-    /// Pops the last component added to the graph.
-    pub(super) fn pop_component(&mut self) -> Option<TestComponent> {
-        self.components.pop()
-    }
-
-    /// Pops the last connection added to the graph.
-    pub(super) fn pop_connection(&mut self) -> Option<TestConnection> {
-        self.connections.pop()
     }
 
     /// Adds a grid component to the graph and returns its handle.

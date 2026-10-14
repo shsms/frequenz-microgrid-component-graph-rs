@@ -95,178 +95,189 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ComponentCategory;
     use crate::ComponentGraph;
     use crate::ComponentGraphConfig;
-    use crate::InverterType;
-    use crate::component_category::BatteryType;
+    use crate::error::Error;
     use crate::graph::test_utils::{
-        ComponentGraphBuilder, TestComponent, TestConnection, validation_error,
+        TestComponent, TestConnection, TestGraph, graph, validation_error,
     };
 
-    fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let components = vec![
-            TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
-            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Pv)),
-            TestComponent::new(3, ComponentCategory::Meter),
-            TestComponent::new(5, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(2, ComponentCategory::Meter),
-            TestComponent::new(9, ComponentCategory::Meter),
-        ];
-        let connections = vec![
-            TestConnection::new(3, 4),
-            TestConnection::new(1, 2),
-            TestConnection::new(7, 8),
-            TestConnection::new(4, 5),
-            TestConnection::new(2, 3),
-            TestConnection::new(6, 7),
-            TestConnection::new(2, 6),
-            TestConnection::new(2, 9),
-            TestConnection::new(9, 10),
-        ];
-
-        (components, connections)
+    /// Builds `g` with its components in declaration order; `TestGraph::build`
+    /// would sort them by ID.
+    ///
+    /// `test_connected_graph_validation` and `test_acyclicity_validation`
+    /// declare components and connections out of ID order, to check that
+    /// validation still works when the input is not sorted.
+    fn build_in_declaration_order(
+        g: &TestGraph,
+        config: Option<ComponentGraphConfig>,
+    ) -> Result<ComponentGraph<TestComponent, TestConnection>, Error> {
+        ComponentGraph::try_new(
+            g.components().to_vec(),
+            g.connections().to_vec(),
+            config.unwrap_or_default(),
+        )
     }
 
     #[test]
     fn test_connected_graph_validation() {
-        let config = ComponentGraphConfig::default();
-        let (mut components, mut connections) = nodes_and_edges();
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+        };
+        assert!(build_in_declaration_order(&g, None).is_ok());
 
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
-        );
-        components.push(TestComponent::new(11, ComponentCategory::Meter));
-        let Err(err) =
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-        else {
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            11: meter,
+        };
+        let Err(err) = build_in_declaration_order(&g, None) else {
             panic!()
         };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == validation_error("Nodes [11] are not connected to the root.", &[11])
-                ),
+            build_in_declaration_order(&g, None).is_err_and(
+                |e| e == validation_error("Nodes [11] are not connected to the root.", &[11])
+            ),
             "{err:?}"
         );
 
-        components.push(TestComponent::new(12, ComponentCategory::Meter));
-
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            11: meter, 12: meter,
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == validation_error(
-                        "Nodes [11, 12] are not connected to the root.",
-                        &[11, 12]
-                    ))
+            build_in_declaration_order(&g, None).is_err_and(|e| e
+                == validation_error("Nodes [11, 12] are not connected to the root.", &[11, 12]))
         );
 
-        connections.push(TestConnection::new(11, 12));
-
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            11: meter => { 12: meter },
+        };
         // With the default config, this fails validation.
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == validation_error(
-                        "Nodes [11, 12] are not connected to the root.",
-                        &[11, 12]
-                    ))
+            build_in_declaration_order(&g, None).is_err_and(|e| e
+                == validation_error("Nodes [11, 12] are not connected to the root.", &[11, 12]))
         );
         // With `allow_unconnected_components=true`, this passes validation.
         assert!(
-            ComponentGraph::try_new(
-                components.clone(),
-                connections.clone(),
-                ComponentGraphConfig::builder()
-                    .allow_unconnected_components(true)
-                    .build(),
+            build_in_declaration_order(
+                &g,
+                Some(
+                    ComponentGraphConfig::builder()
+                        .allow_unconnected_components(true)
+                        .build(),
+                ),
             )
             .is_ok()
-        );
-
-        connections.pop();
-        components.pop();
-        components.pop();
-
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
         );
     }
 
     #[test]
     fn test_acyclicity_validation() {
-        let config = ComponentGraphConfig::default();
-        let (components, mut connections) = nodes_and_edges();
-
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
-        );
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+        };
+        assert!(build_in_declaration_order(&g, None).is_ok());
 
         // add cycles at different levels
-        connections.push(TestConnection::new(3, 2));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            3 => { 2 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+            build_in_declaration_order(&g, None)
                 .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 3 -> 2", &[2, 3])),
         );
 
-        connections.pop();
-        connections.push(TestConnection::new(4, 2));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            4 => { 2 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 2", &[2, 3, 4])
-                )
+            build_in_declaration_order(&g, None).is_err_and(
+                |e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 2", &[2, 3, 4])
+            )
         );
 
-        connections.pop();
-        connections.push(TestConnection::new(5, 2));
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(|e| e
-                    == validation_error("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2", &[2, 3, 4, 5]))
-        );
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            5 => { 2 },
+        };
+        assert!(build_in_declaration_order(&g, None).is_err_and(
+            |e| e == validation_error("Cycle detected: 2 -> 3 -> 4 -> 5 -> 2", &[2, 3, 4, 5])
+        ));
 
-        connections.pop();
-        connections.push(TestConnection::new(4, 3));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            4 => { 3 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+            build_in_declaration_order(&g, None)
                 .is_err_and(|e| e == validation_error("Cycle detected: 3 -> 4 -> 3", &[3, 4]))
         );
 
-        connections.pop();
-        connections.push(TestConnection::new(5, 3));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            5 => { 3 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_err_and(
-                    |e| e == validation_error("Cycle detected: 3 -> 4 -> 5 -> 3", &[3, 4, 5])
-                )
+            build_in_declaration_order(&g, None).is_err_and(
+                |e| e == validation_error("Cycle detected: 3 -> 4 -> 5 -> 3", &[3, 4, 5])
+            )
         );
 
-        connections.pop();
-        connections.push(TestConnection::new(5, 4));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            5 => { 4 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+            build_in_declaration_order(&g, None)
                 .is_err_and(|e| e == validation_error("Cycle detected: 4 -> 5 -> 4", &[4, 5]))
         );
 
-        connections.pop();
-        connections.push(TestConnection::new(9, 2));
+        let g = graph! {
+            3: meter => { 4: inv_bat => { 5: bat(Unspecified) } },
+            6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+            9: meter => { 10: inv_pv },
+            1: grid => { 2: meter => { 3, 6, 9 } },
+            9 => { 2 },
+        };
         assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
+            build_in_declaration_order(&g, None)
                 .is_err_and(|e| e == validation_error("Cycle detected: 2 -> 9 -> 2", &[2, 9]))
-        );
-
-        connections.pop();
-        assert!(
-            ComponentGraph::try_new(components.clone(), connections.clone(), config.clone())
-                .is_ok()
         );
     }
 
@@ -275,51 +286,35 @@ mod tests {
     /// outcomes are combined, not overwritten by whichever runs last.
     #[test]
     fn test_tolerated_failure_does_not_mask_a_fatal_one() {
-        let components = vec![
-            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
-            TestComponent::new(2, ComponentCategory::Meter),
-            TestComponent::new(3, ComponentCategory::Battery(BatteryType::LiIon)),
+        let g = graph! {
+            // The meter -> battery edge breaks a neighbor rule, which *is*
+            // tolerated.
+            1: grid => { 2: meter => { 3: bat } },
             // Node 4 is left unconnected, which is not tolerated by default.
-            TestComponent::new(4, ComponentCategory::Meter),
-        ];
-        // The meter -> battery edge breaks a neighbor rule, which *is* tolerated.
-        let connections = vec![TestConnection::new(1, 2), TestConnection::new(2, 3)];
+            4: meter,
+        };
         let config = ComponentGraphConfig::builder()
             .allow_component_validation_failures(true)
             .build();
 
-        assert!(ComponentGraph::try_new(components, connections, config).is_err());
+        assert!(g.build(Some(config)).is_err());
     }
 
     /// A pass-through-only cycle attached to an otherwise-valid graph
     /// is rejected at construction time. The acyclicity validator
     /// walks the raw graph so cycles composed entirely of pass-through
     /// nodes are still detected.
-    ///
-    /// Topology: a normal `Grid → Meter → BatteryInverter → Battery`
-    /// branch, plus a side-branch `Grid → PT1 → PT2 → PT3 → PT1` cycle.
     #[test]
     fn test_acyclicity_detects_passthrough_only_cycle() {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        let pt1 = builder.power_transformer();
-        let pt2 = builder.power_transformer();
-        let pt3 = builder.power_transformer();
-
-        builder.connect(grid, meter);
-        builder.connect(meter, inverter);
-        builder.connect(inverter, battery);
-
-        builder.connect(grid, pt1);
-        builder.connect(pt1, pt2);
-        builder.connect(pt2, pt3);
-        builder.connect(pt3, pt1);
+        let g = graph! {
+            0: grid => {
+                1: meter => { 2: inv_bat => { 3: bat } },
+                4: transformer => { 5: transformer => { 6: transformer => { 4 } } },
+            },
+        };
 
         assert!(
-            builder.build(None).is_err(),
+            g.build(None).is_err(),
             "PT-only cycle reachable from the GCP must be detected at construction time"
         );
     }
