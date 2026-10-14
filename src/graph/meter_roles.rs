@@ -205,137 +205,75 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ComponentCategory;
-    use crate::ComponentGraphConfig;
-    use crate::InverterType;
-    use crate::component_category::BatteryType;
-    use crate::component_category::EvChargerType;
     use crate::error::Error;
-    use crate::graph::test_utils::{TestComponent, TestConnection};
+    use crate::graph::test_utils::{TestComponent, TestConnection, TestGraph, graph};
 
-    fn nodes_and_edges() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let components = vec![
-            TestComponent::new(1, ComponentCategory::GridConnectionPoint),
-            TestComponent::new(2, ComponentCategory::Meter),
-            TestComponent::new(3, ComponentCategory::Meter),
-            TestComponent::new(4, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(5, ComponentCategory::Battery(BatteryType::NaIon)),
-            TestComponent::new(6, ComponentCategory::Meter),
-            TestComponent::new(7, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(8, ComponentCategory::Battery(BatteryType::Unspecified)),
-            TestComponent::new(9, ComponentCategory::Meter),
-            TestComponent::new(10, ComponentCategory::Inverter(InverterType::Pv)),
-            TestComponent::new(11, ComponentCategory::Inverter(InverterType::Pv)),
-            TestComponent::new(12, ComponentCategory::Meter),
-            TestComponent::new(13, ComponentCategory::Chp),
-            TestComponent::new(14, ComponentCategory::Meter),
-            TestComponent::new(15, ComponentCategory::Chp),
-            TestComponent::new(16, ComponentCategory::Inverter(InverterType::Pv)),
-            TestComponent::new(17, ComponentCategory::Inverter(InverterType::Battery)),
-            TestComponent::new(18, ComponentCategory::Battery(BatteryType::LiIon)),
-            TestComponent::new(19, ComponentCategory::Meter),
-            TestComponent::new(20, ComponentCategory::SteamBoiler),
-        ];
-        let connections = vec![
-            // Single Grid meter
-            TestConnection::new(1, 2),
-            // Battery chain
-            TestConnection::new(2, 3),
-            TestConnection::new(3, 4),
-            TestConnection::new(4, 5),
-            // Battery chain
-            TestConnection::new(2, 6),
-            TestConnection::new(6, 7),
-            TestConnection::new(7, 8),
-            // Solar chain
-            TestConnection::new(2, 9),
-            TestConnection::new(9, 10),
-            TestConnection::new(9, 11),
-            // CHP chain
-            TestConnection::new(2, 12),
-            TestConnection::new(12, 13),
-            // Mixed chain
-            TestConnection::new(2, 14),
-            TestConnection::new(14, 15),
-            TestConnection::new(14, 16),
-            TestConnection::new(14, 17),
-            TestConnection::new(17, 18),
-            // Steam boiler chain
-            TestConnection::new(2, 19),
-            TestConnection::new(19, 20),
-        ];
-
-        (components, connections)
+    fn nodes_and_edges() -> TestGraph {
+        graph! {
+            1: grid => {
+                // Single grid meter
+                2: meter => {
+                    3: meter => { 4: inv_bat => { 5: bat(NaIon) } },
+                    6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+                    9: meter => { 10: inv_pv, 11: inv_pv },
+                    12: meter => { 13: chp },
+                    // Mixed chain
+                    14: meter => { 15: chp, 16: inv_pv, 17: inv_bat => { 18: bat } },
+                    19: meter => { 20: boiler },
+                },
+            },
+        }
     }
 
-    fn with_multiple_grid_meters() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let (mut components, mut connections) = nodes_and_edges();
-
-        // Add a meter to the grid without successors
-        components.push(TestComponent::new(21, ComponentCategory::Meter));
-        connections.push(TestConnection::new(1, 21));
-
-        // Add a meter to the grid that has a battery meter and a PV meter as
-        // successors.
-        components.push(TestComponent::new(22, ComponentCategory::Meter));
-        connections.push(TestConnection::new(1, 22));
-
-        // battery chain
-        components.push(TestComponent::new(23, ComponentCategory::Meter));
-        components.push(TestComponent::new(
-            24,
-            ComponentCategory::Inverter(InverterType::Battery),
-        ));
-        components.push(TestComponent::new(
-            25,
-            ComponentCategory::Battery(BatteryType::Unspecified),
-        ));
-        connections.push(TestConnection::new(22, 23));
-        connections.push(TestConnection::new(23, 24));
-        connections.push(TestConnection::new(24, 25));
-
-        // pv chain
-        components.push(TestComponent::new(26, ComponentCategory::Meter));
-        components.push(TestComponent::new(
-            27,
-            ComponentCategory::Inverter(InverterType::Pv),
-        ));
-        connections.push(TestConnection::new(22, 26));
-        connections.push(TestConnection::new(26, 27));
-
-        // steam boiler chain
-        components.push(TestComponent::new(28, ComponentCategory::Meter));
-        components.push(TestComponent::new(29, ComponentCategory::SteamBoiler));
-        connections.push(TestConnection::new(22, 28));
-        connections.push(TestConnection::new(28, 29));
-
-        (components, connections)
+    fn with_multiple_grid_meters() -> TestGraph {
+        graph! {
+            1: grid => {
+                2: meter => {
+                    3: meter => { 4: inv_bat => { 5: bat(NaIon) } },
+                    6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+                    9: meter => { 10: inv_pv, 11: inv_pv },
+                    12: meter => { 13: chp },
+                    // Mixed chain
+                    14: meter => { 15: chp, 16: inv_pv, 17: inv_bat => { 18: bat } },
+                    19: meter => { 20: boiler },
+                },
+                // A meter on the grid without successors.
+                21: meter,
+                // A meter on the grid that has a battery meter, a PV meter and
+                // a steam boiler meter as successors.
+                22: meter => {
+                    23: meter => { 24: inv_bat => { 25: bat(Unspecified) } },
+                    26: meter => { 27: inv_pv },
+                    28: meter => { 29: boiler },
+                },
+            },
+        }
     }
 
-    fn without_grid_meters() -> (Vec<TestComponent>, Vec<TestConnection>) {
-        let (mut components, mut connections) = nodes_and_edges();
-
-        // Add an EV charger meter to the grid, then none of the meters
-        // connected to the grid should be detected as grid meters.
-        components.push(TestComponent::new(21, ComponentCategory::Meter));
-        components.push(TestComponent::new(
-            22,
-            ComponentCategory::EvCharger(EvChargerType::Ac),
-        ));
-        connections.push(TestConnection::new(1, 21));
-        connections.push(TestConnection::new(21, 22));
-
-        (components, connections)
+    fn without_grid_meters() -> TestGraph {
+        graph! {
+            1: grid => {
+                2: meter => {
+                    3: meter => { 4: inv_bat => { 5: bat(NaIon) } },
+                    6: meter => { 7: inv_bat => { 8: bat(Unspecified) } },
+                    9: meter => { 10: inv_pv, 11: inv_pv },
+                    12: meter => { 13: chp },
+                    // Mixed chain
+                    14: meter => { 15: chp, 16: inv_pv, 17: inv_bat => { 18: bat } },
+                    19: meter => { 20: boiler },
+                },
+                // An EV charger meter on the grid: none of the meters connected
+                // to the grid should be detected as grid meters.
+                21: meter => { 22: ev },
+            },
+        }
     }
 
     fn find_matching_components(
-        components: Vec<TestComponent>,
-        connections: Vec<TestConnection>,
+        g: TestGraph,
         filter: impl Fn(&ComponentGraph<TestComponent, TestConnection>, u64) -> Result<bool, Error>,
     ) -> Result<Vec<u64>, Error> {
-        let config = ComponentGraphConfig::default();
-
-        let graph = ComponentGraph::try_new(components.clone(), connections.clone(), config)?;
+        let graph = g.build(None)?;
 
         let mut found_meters = vec![];
         for comp in graph.components() {
@@ -349,21 +287,18 @@ mod tests {
 
     #[test]
     fn test_is_pv_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_pv_meter)?,
+            find_matching_components(nodes_and_edges(), ComponentGraph::is_pv_meter)?,
             vec![9],
         );
 
-        let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_pv_meter)?,
+            find_matching_components(with_multiple_grid_meters(), ComponentGraph::is_pv_meter)?,
             vec![9, 26],
         );
 
-        let (components, connections) = without_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_pv_meter)?,
+            find_matching_components(without_grid_meters(), ComponentGraph::is_pv_meter)?,
             vec![9],
         );
 
@@ -372,21 +307,21 @@ mod tests {
 
     #[test]
     fn test_is_battery_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_battery_meter)?,
+            find_matching_components(nodes_and_edges(), ComponentGraph::is_battery_meter)?,
             vec![3, 6],
         );
 
-        let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_battery_meter)?,
+            find_matching_components(
+                with_multiple_grid_meters(),
+                ComponentGraph::is_battery_meter
+            )?,
             vec![3, 6, 23],
         );
 
-        let (components, connections) = without_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_battery_meter)?,
+            find_matching_components(without_grid_meters(), ComponentGraph::is_battery_meter)?,
             vec![3, 6],
         );
 
@@ -395,21 +330,18 @@ mod tests {
 
     #[test]
     fn test_is_chp_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_chp_meter)?,
+            find_matching_components(nodes_and_edges(), ComponentGraph::is_chp_meter)?,
             vec![12],
         );
 
-        let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_chp_meter)?,
+            find_matching_components(with_multiple_grid_meters(), ComponentGraph::is_chp_meter)?,
             vec![12],
         );
 
-        let (components, connections) = without_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_chp_meter)?,
+            find_matching_components(without_grid_meters(), ComponentGraph::is_chp_meter)?,
             vec![12],
         );
 
@@ -418,21 +350,21 @@ mod tests {
 
     #[test]
     fn test_is_ev_charger_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
+            find_matching_components(nodes_and_edges(), ComponentGraph::is_ev_charger_meter)?,
             vec![],
         );
 
-        let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
+            find_matching_components(
+                with_multiple_grid_meters(),
+                ComponentGraph::is_ev_charger_meter
+            )?,
             vec![],
         );
 
-        let (components, connections) = without_grid_meters();
         assert_eq!(
-            find_matching_components(components, connections, ComponentGraph::is_ev_charger_meter)?,
+            find_matching_components(without_grid_meters(), ComponentGraph::is_ev_charger_meter)?,
             vec![21],
         );
 
@@ -441,33 +373,21 @@ mod tests {
 
     #[test]
     fn test_is_steam_boiler_meter() -> Result<(), Error> {
-        let (components, connections) = nodes_and_edges();
         assert_eq!(
-            find_matching_components(
-                components,
-                connections,
-                ComponentGraph::is_steam_boiler_meter
-            )?,
+            find_matching_components(nodes_and_edges(), ComponentGraph::is_steam_boiler_meter)?,
             vec![19],
         );
 
-        let (components, connections) = with_multiple_grid_meters();
         assert_eq!(
             find_matching_components(
-                components,
-                connections,
+                with_multiple_grid_meters(),
                 ComponentGraph::is_steam_boiler_meter
             )?,
             vec![19, 28],
         );
 
-        let (components, connections) = without_grid_meters();
         assert_eq!(
-            find_matching_components(
-                components,
-                connections,
-                ComponentGraph::is_steam_boiler_meter
-            )?,
+            find_matching_components(without_grid_meters(), ComponentGraph::is_steam_boiler_meter)?,
             vec![19],
         );
 
