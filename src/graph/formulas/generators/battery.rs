@@ -104,19 +104,10 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{
-        ComponentGraphConfig, Error, FormulaOverrides, InverterType,
-        graph::test_utils::ComponentGraphBuilder,
-    };
+    use crate::{ComponentGraphConfig, Error, FormulaOverrides, graph::test_utils::graph};
 
     #[test]
     fn test_battery_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // The global setting is meter-first. The battery override flips it
         // back to component-first. The component-first assertions below hold
         // only because the per-formula override wins over the global setting.
@@ -131,28 +122,33 @@ mod tests {
                 .build(),
         );
 
-        let graph = builder.build(prefer_inverters_config.clone())?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "0.0");
 
-        // Add a battery meter with one inverter and one battery.
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        assert_eq!(grid_meter.component_id(), 1);
-        assert_eq!(meter_bat_chain.component_id(), 2);
-
-        let graph = builder.build(prefer_inverters_config.clone())?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    // A battery meter with one inverter and one battery.
+                    2: meter => { 3: inv_bat => { 4: bat } },
+                },
+            },
+        }
+        .build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0)");
 
-        // Add a second battery meter with one inverter and two batteries.
-        let meter_bat_chain = builder.meter_bat_chain(1, 2);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        assert_eq!(meter_bat_chain.component_id(), 5);
-
-        let graph = builder.build(prefer_inverters_config.clone())?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_bat => { 4: bat } },
+                    // A second battery meter with one inverter and two
+                    // batteries.
+                    5: meter => { 6: inv_bat => { 7: bat, 8: bat } },
+                },
+            },
+        }
+        .build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0) + COALESCE(#6, #5, 0.0)");
 
@@ -171,13 +167,21 @@ mod tests {
             .to_string();
         assert_eq!(formula, "COALESCE(#3, #2, 0.0) + COALESCE(#6, #5, 0.0)");
 
-        // Add a third battery meter with two inverters with two connected batteries.
-        let meter_bat_chain = builder.meter_bat_chain(2, 2);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        assert_eq!(meter_bat_chain.component_id(), 9);
-
-        let graph = builder.build(prefer_inverters_config.clone())?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_bat => { 4: bat } },
+                    5: meter => { 6: inv_bat => { 7: bat, 8: bat } },
+                    // A third battery meter with two inverters with two
+                    // connected batteries.
+                    9: meter => {
+                        10: inv_bat => { 12: bat, 13: bat },
+                        11: inv_bat => { 12, 13 },
+                    },
+                },
+            },
+        }
+        .build(prefer_inverters_config.clone())?;
         let formula = graph.battery_formula(None)?.to_string();
         assert_eq!(
             formula,
@@ -196,14 +200,22 @@ mod tests {
             "COALESCE(#11 + #10, #9, COALESCE(#11, 0.0) + COALESCE(#10, 0.0))"
         );
 
-        // add a PV meter with two PV inverters.
-        let meter_pv_chain = builder.meter_pv_chain(2);
-        builder.connect(grid_meter, meter_pv_chain);
-
-        assert_eq!(meter_pv_chain.component_id(), 14);
-
-        let graph = builder.build(prefer_inverters_config)?;
-        let graph_prefer_meters = builder.build(Some(
+        let g = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_bat => { 4: bat } },
+                    5: meter => { 6: inv_bat => { 7: bat, 8: bat } },
+                    9: meter => {
+                        10: inv_bat => { 12: bat, 13: bat },
+                        11: inv_bat => { 12, 13 },
+                    },
+                    // A PV meter with two PV inverters.
+                    14: meter => { 15: inv_pv, 16: inv_pv },
+                },
+            },
+        };
+        let graph = g.build(prefer_inverters_config)?;
+        let graph_prefer_meters = g.build(Some(
             ComponentGraphConfig::builder()
                 .prefer_meters_in_component_formulas(true)
                 .build(),
@@ -227,32 +239,34 @@ mod tests {
             )
         );
 
-        // add a battery meter with two inverters that have their own batteries.
-        let meter = builder.meter();
-        builder.connect(grid, meter);
-        let inv_bat_chain = builder.inv_bat_chain(1);
-        builder.connect(meter, inv_bat_chain);
-
-        assert_eq!(meter.component_id(), 17);
-        assert_eq!(inv_bat_chain.component_id(), 18);
-
-        let unspec_inverter = builder.add_component(crate::ComponentCategory::Inverter(
-            InverterType::Unspecified,
-        ));
-        let battery = builder.battery();
-        builder.connect(unspec_inverter, battery);
-        builder.connect(meter, unspec_inverter);
-
-        assert_eq!(unspec_inverter.component_id(), 20);
+        let g = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_bat => { 4: bat } },
+                    5: meter => { 6: inv_bat => { 7: bat, 8: bat } },
+                    9: meter => {
+                        10: inv_bat => { 12: bat, 13: bat },
+                        11: inv_bat => { 12, 13 },
+                    },
+                    14: meter => { 15: inv_pv, 16: inv_pv },
+                },
+                // A battery meter with two inverters that have their own
+                // batteries.
+                17: meter => {
+                    18: inv_bat => { 19: bat },
+                    20: inv(Unspecified) => { 21: bat },
+                },
+            },
+        };
 
         assert!(
-            builder.build(None).is_err_and(|x| x.to_string()
+            g.build(None).is_err_and(|x| x.to_string()
                 == "InvalidComponent: InverterType not specified for inverter: 20")
         );
 
         // As above: the component-first assertions hold only because the
         // per-battery override wins over the global meter-first setting.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .allow_unspecified_inverters(true)
                 .prefer_meters_in_component_formulas(true)
@@ -263,7 +277,7 @@ mod tests {
                 )
                 .build(),
         ))?;
-        let graph_prefer_meters = builder.build(Some(
+        let graph_prefer_meters = g.build(Some(
             ComponentGraphConfig::builder()
                 .allow_unspecified_inverters(true)
                 .prefer_meters_in_component_formulas(true)
@@ -374,23 +388,12 @@ mod tests {
 
     /// A component is measured through its predecessor meter, found by walking
     /// past a pass-through node.
-    ///
-    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
     #[test]
     fn test_battery_formula_finds_meter_through_passthrough() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        let pt = builder.power_transformer();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-
-        builder.connect(grid, meter);
-        builder.connect(meter, pt);
-        builder.connect(pt, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: transformer => { 3: inv_bat => { 4: bat } } } },
+        }
+        .build(None)?;
         let formula = graph.battery_formula(None)?.to_string();
         // Inverter falls back to its effective predecessor meter,
         // walking past the transformer.
@@ -401,23 +404,12 @@ mod tests {
     /// A hybrid inverter is not a battery-power source: its AC reading
     /// mixes in its PV production. Selecting the battery explicitly must
     /// agree with the no-selection path, which already leaves hybrids out.
-    ///
-    /// Topology (ids): `Grid:0 → Meter:1 → HybridInverter:2 → Battery:3`,
-    /// then a second chain `Meter:1 → Meter:4 → BatteryInverter:5 →
-    /// Battery:6`.
     #[test]
     fn test_battery_formula_ignores_a_hybrid_inverter() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        let hybrid =
-            builder.add_component(crate::ComponentCategory::Inverter(InverterType::Hybrid));
-        let hybrid_battery = builder.battery();
-        builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, hybrid);
-        builder.connect(hybrid, hybrid_battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: inv_hybrid => { 3: bat } } },
+        }
+        .build(None)?;
         assert_eq!(graph.battery_formula(None)?.to_string(), "0.0");
         assert_eq!(
             graph
@@ -428,14 +420,15 @@ mod tests {
 
         // Next to a real battery chain, both entry points count only that
         // chain.
-        let battery_meter = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        builder.connect(grid_meter, battery_meter);
-        builder.connect(battery_meter, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: inv_hybrid => { 3: bat },
+                    4: meter => { 5: inv_bat => { 6: bat } },
+                },
+            },
+        }
+        .build(None)?;
         assert_eq!(
             graph.battery_formula(None)?.to_string(),
             "COALESCE(#5, #4, 0.0)"

@@ -158,56 +158,51 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::test_utils::ComponentGraphBuilder;
-    use crate::{ComponentCategory, OperationalMode};
+    use crate::graph::test_utils::graph;
 
     #[test]
     fn test_grid_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        // Add a grid meter and a battery chain behind it.
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "#1");
 
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "#1");
 
-        // Add an additional dangling meter, and a PV chain and a battery chain
-        // to the grid
-        let dangling_meter = builder.meter();
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        let meter_pv_chain = builder.meter_pv_chain(1);
-        builder.connect(grid, dangling_meter);
-        builder.connect(grid, meter_bat_chain);
-        builder.connect(grid, meter_pv_chain);
-
-        assert_eq!(dangling_meter.component_id(), 5);
-        assert_eq!(meter_bat_chain.component_id(), 6);
-        assert_eq!(meter_pv_chain.component_id(), 9);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+                // An additional dangling meter, and a PV chain and a battery
+                // chain on the grid.
+                5: meter,
+                6: meter => { 7: inv_bat => { 8: bat } },
+                9: meter => { 10: inv_pv },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
             "#1 + #5 + COALESCE(#6, #7, 0.0) + COALESCE(#9, #10, 0.0)"
         );
 
-        // Add a PV inverter to the grid, without a meter.
-        let pv_inverter = builder.solar_inverter();
-        builder.connect(grid, pv_inverter);
-
-        assert_eq!(pv_inverter.component_id(), 11);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+                5: meter,
+                6: meter => { 7: inv_bat => { 8: bat } },
+                9: meter => { 10: inv_pv },
+                // A PV inverter on the grid, without a meter.
+                11: inv_pv,
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(
             formula,
@@ -219,36 +214,51 @@ mod tests {
 
     #[test]
     fn test_grid_formula_with_fallback_grid_meter() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        let meter1 = builder.meter();
-        let meter2 = builder.meter();
-        let bat_chain = builder.meter_bat_chain(1, 1);
-        let pv_chain = builder.meter_pv_chain(1);
-
-        builder.connect(grid, meter1);
-        builder.connect(meter1, meter2);
-        builder.connect(meter2, bat_chain);
-        builder.connect(meter2, pv_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => {
+                        3: meter => { 4: inv_bat => { 5: bat } },
+                        6: meter => { 7: inv_pv },
+                    },
+                },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "COALESCE(#1, #2)");
 
-        // Add a battery chain directly to the grid
-        let bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid, bat_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => {
+                        3: meter => { 4: inv_bat => { 5: bat } },
+                        6: meter => { 7: inv_pv },
+                    },
+                },
+                // A battery chain directly on the grid.
+                8: meter => { 9: inv_bat => { 10: bat } },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "COALESCE(#1, #2) + COALESCE(#8, #9, 0.0)");
 
-        // Add a PV chain directly to meter1, making meter2 not a fallback
-        let pv_chain = builder.meter_pv_chain(1);
-        builder.connect(meter1, pv_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => {
+                        3: meter => { 4: inv_bat => { 5: bat } },
+                        6: meter => { 7: inv_pv },
+                    },
+                    // A PV chain directly on meter 1, making meter 2 not a
+                    // fallback.
+                    11: meter => { 12: inv_pv },
+                },
+                8: meter => { 9: inv_bat => { 10: bat } },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert_eq!(formula, "#1 + COALESCE(#8, #9, 0.0)");
 
@@ -259,23 +269,12 @@ mod tests {
     /// connection point and uses the meter beneath it as the measurement
     /// source. The formula is the same as for the equivalent
     /// `Grid → Meter → Inverter → Battery` graph.
-    ///
-    /// Topology (component ids): `Grid:0 → PT:1 → Meter:2 → Inverter:3 → Battery:4`
     #[test]
     fn test_grid_formula_skips_passthrough_at_root() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let pt = builder.power_transformer();
-        let meter = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-
-        builder.connect(grid, pt);
-        builder.connect(pt, meter);
-        builder.connect(meter, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: transformer => { 2: meter => { 3: inv_bat => { 4: bat } } } },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert!(
             !formula.contains("#1"),
@@ -288,23 +287,12 @@ mod tests {
     /// A meter is measured from its *effective* successors: the walk passes
     /// the pass-through and reaches the inverter. The transformer itself has
     /// no measurement, so it is not part of the formula.
-    ///
-    /// Topology (component ids): `Grid:0 → Meter:1 → PT:2 → Inverter:3 → Battery:4`
     #[test]
     fn test_grid_formula_skips_passthrough_successor() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        let pt = builder.power_transformer();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-
-        builder.connect(grid, meter);
-        builder.connect(meter, pt);
-        builder.connect(pt, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: transformer => { 3: inv_bat => { 4: bat } } } },
+        }
+        .build(None)?;
         let formula = graph.grid_formula()?.to_string();
         assert!(
             !formula.contains("#2"),
@@ -319,19 +307,9 @@ mod tests {
     /// shape makes. The reading misses unmodeled loads on the silent
     /// segment and anything fed around the silent meter; the silent
     /// meter's own id never appears.
-    ///
-    /// Topology (ids): `Grid:0 → GridMeter:1 (no telemetry) → Meter:2`.
     #[test]
     fn test_grid_formula_no_telemetry_grid_meter() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let meter = builder.meter();
-        builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter [Inactive] => { 2: meter } } }.build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "#2");
         Ok(())
     }
@@ -342,25 +320,15 @@ mod tests {
     /// covers both feeds exactly, is primary, and the reporting meter is
     /// the best-effort backup. A per-feed term would count the silent
     /// feed as a hard 0.0.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1 (no telemetry), Meter:2}`,
-    /// both → `BatteryInverter:3 → Battery:4`.
     #[test]
     fn test_grid_formula_backs_a_diamond_with_a_silent_leg() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let silent =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let reporting = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        builder.connect(grid, silent);
-        builder.connect(grid, reporting);
-        builder.connect(silent, inverter);
-        builder.connect(reporting, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter [Inactive] => { 3: inv_bat => { 4: bat } },
+                2: meter => { 3 },
+            },
+        }
+        .build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "COALESCE(#3, #2, 0.0)");
 
         Ok(())
@@ -369,26 +337,15 @@ mod tests {
     /// The same diamond with both meters silent: nothing meter-side can
     /// ever resolve, so the formula is the inverter's reading alone —
     /// null when it is offline, never a fabricated zero.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2} (both no
-    /// telemetry)`, both → `BatteryInverter:3 → Battery:4`.
     #[test]
     fn test_grid_formula_backs_a_diamond_with_both_legs_silent() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let a =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let b =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        builder.connect(grid, a);
-        builder.connect(grid, b);
-        builder.connect(a, inverter);
-        builder.connect(b, inverter);
-        builder.connect(inverter, battery);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter [Inactive] => { 3: inv_bat => { 4: bat } },
+                2: meter [Inactive] => { 3 },
+            },
+        }
+        .build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "#3");
 
         Ok(())
@@ -397,26 +354,16 @@ mod tests {
     /// A reporting diamond gains the same backing — one meter dropping
     /// out at runtime no longer nulls the sum — and a feed with nothing
     /// in common keeps its own term.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1, Meter:2, Meter:5}`,
-    /// `{Meter:1, Meter:2} → BatteryInverter:3 → Battery:4`.
     #[test]
     fn test_grid_formula_groups_only_the_overlapping_feeds() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let a = builder.meter();
-        let b = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        let lone = builder.meter();
-        builder.connect(grid, a);
-        builder.connect(grid, b);
-        builder.connect(a, inverter);
-        builder.connect(b, inverter);
-        builder.connect(inverter, battery);
-        builder.connect(grid, lone);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 3: inv_bat => { 4: bat } },
+                2: meter => { 3 },
+                5: meter,
+            },
+        }
+        .build(None)?;
         assert_eq!(
             graph.grid_formula()?.to_string(),
             "COALESCE(#2 + #1, #3, COALESCE(#2, 0.0) + COALESCE(#1, 0.0)) + #5"
@@ -430,26 +377,21 @@ mod tests {
     /// never appears. A silent grid meter with no child read through it
     /// alone still yields `None`; one with reporting children resolves
     /// through them, as the reporting ladder already does at runtime.
-    ///
-    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 (no telemetry) →
-    /// Meter:3 → {battery chain 4-6, PV chain 7-8}`.
     #[test]
     fn test_grid_formula_drills_through_a_silent_chain_link() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let m1 = builder.meter();
-        let m2 =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let m3 = builder.meter();
-        builder.connect(grid, m1);
-        builder.connect(m1, m2);
-        builder.connect(m2, m3);
-        let bat = builder.meter_bat_chain(1, 1);
-        let pv = builder.meter_pv_chain(1);
-        builder.connect(m3, bat);
-        builder.connect(m3, pv);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter [Inactive] => {
+                        3: meter => {
+                            4: meter => { 5: inv_bat => { 6: bat } },
+                            7: meter => { 8: inv_pv },
+                        },
+                    },
+                },
+            },
+        }
+        .build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "COALESCE(#1, #3)");
 
         Ok(())
@@ -457,19 +399,9 @@ mod tests {
     /// A reporting grid meter over a silent dead-end meter stays bare:
     /// nothing below it can back the reading, and a 0.0 fallback would
     /// assert one when the meter drops offline.
-    ///
-    /// Topology (ids): `Grid:0 → GridMeter:1 → Meter:2 (no telemetry)`.
     #[test]
     fn test_grid_formula_keeps_a_grid_meter_bare_over_a_silent_dead_end() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        let silent =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, silent);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter => { 2: meter [Inactive] } } }.build(None)?;
         assert_eq!(graph.grid_formula()?.to_string(), "#1");
 
         Ok(())

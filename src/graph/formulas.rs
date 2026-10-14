@@ -210,33 +210,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ComponentCategory, Error, InverterType, OperationalMode,
-        graph::test_utils::ComponentGraphBuilder,
-    };
+    use crate::{Error, graph::test_utils::graph};
 
     /// `component_formula` and `component_ac_coalesce_formula` return the bare
     /// reading of the requested component — no meter fallback, even when the
     /// component sits behind a meter the category formulas would drill into.
     #[test]
     fn test_component_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        let inverter = builder.battery_inverter();
-        let battery = builder.battery();
-        builder.connect(grid, meter);
-        builder.connect(meter, inverter);
-        builder.connect(inverter, battery);
+        let graph =
+            graph! { 0: grid => { 1: meter => { 2: inv_bat => { 3: bat } } } }.build(None)?;
 
-        let graph = builder.build(None)?;
-        let inv = inverter.component_id();
-
-        assert_eq!(graph.component_formula(inv)?.to_string(), format!("#{inv}"));
-        assert_eq!(
-            graph.component_ac_coalesce_formula(inv)?.to_string(),
-            format!("#{inv}")
-        );
+        assert_eq!(graph.component_formula(2)?.to_string(), "#2");
+        assert_eq!(graph.component_ac_coalesce_formula(2)?.to_string(), "#2");
         Ok(())
     }
 
@@ -244,51 +229,28 @@ mod tests {
     /// variants are `None`.
     #[test]
     fn test_component_formula_no_telemetry() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        let inverter = builder.add_component_with_mode(
-            ComponentCategory::Inverter(InverterType::Battery),
-            OperationalMode::ControlOnly,
-        );
-        let battery = builder.battery();
-        builder.connect(grid, meter);
-        builder.connect(meter, inverter);
-        builder.connect(inverter, battery);
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: inv_bat [ControlOnly] => { 3: bat } } },
+        }
+        .build(None)?;
 
-        let graph = builder.build(None)?;
-        let inv = inverter.component_id();
-
-        assert_eq!(graph.component_formula(inv)?.to_string(), "None");
-        assert_eq!(
-            graph.component_ac_coalesce_formula(inv)?.to_string(),
-            "None"
-        );
+        assert_eq!(graph.component_formula(2)?.to_string(), "None");
+        assert_eq!(graph.component_ac_coalesce_formula(2)?.to_string(), "None");
         Ok(())
     }
 
     /// The no-telemetry check has no category test, so a meter with no
     /// telemetry gets `None` like any other component. The meter here is not
     /// the grid meter, whose term is already null for its own reason.
-    ///
-    /// Topology (ids): `Grid:0 → Meter:1 → Meter:2 (no telemetry) → PV:3`.
     #[test]
     fn test_component_formula_no_telemetry_meter() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        let silent_meter =
-            builder.add_component_with_mode(ComponentCategory::Meter, OperationalMode::Inactive);
-        let pv = builder.solar_inverter();
-        builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, silent_meter);
-        builder.connect(silent_meter, pv);
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: meter [Inactive] => { 3: inv_pv } } },
+        }
+        .build(None)?;
 
-        let graph = builder.build(None)?;
-        let id = silent_meter.component_id();
-
-        assert_eq!(graph.component_formula(id)?.to_string(), "None");
-        assert_eq!(graph.component_ac_coalesce_formula(id)?.to_string(), "None");
+        assert_eq!(graph.component_formula(2)?.to_string(), "None");
+        assert_eq!(graph.component_ac_coalesce_formula(2)?.to_string(), "None");
         Ok(())
     }
 
@@ -296,11 +258,7 @@ mod tests {
     /// when it is not in the graph.
     #[test]
     fn test_component_formula_unknown_id() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let meter = builder.meter();
-        builder.connect(grid, meter);
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
 
         assert!(
             graph

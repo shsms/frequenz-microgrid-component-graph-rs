@@ -64,26 +64,17 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{
-        ComponentGraphConfig, Error, FormulaOverrides, graph::test_utils::ComponentGraphBuilder,
-    };
+    use crate::{ComponentGraphConfig, Error, FormulaOverrides, graph::test_utils::graph};
 
     #[test]
     fn test_chp_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // No CHPs in the graph.
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         assert_eq!(graph.chp_formula(None)?.to_string(), "0.0");
 
-        // A CHP meter (id 2) with two CHPs (ids 3, 4).
-        let meter_chp_chain = builder.meter_chp_chain(2);
-        builder.connect(grid_meter, meter_chp_chain);
-
-        let graph = builder.build(None)?;
+        // A CHP meter with two CHPs.
+        let g = graph! { 0: grid => { 1: meter => { 2: meter => { 3: chp, 4: chp } } } };
+        let graph = g.build(None)?;
         assert_eq!(
             graph.chp_formula(None)?.to_string(),
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
@@ -94,7 +85,7 @@ mod tests {
         );
 
         // The per-category override flips the meter-vs-component preference.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
@@ -121,20 +112,13 @@ mod tests {
 
     #[test]
     fn test_ev_charger_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // No EV chargers in the graph.
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         assert_eq!(graph.ev_charger_formula(None)?.to_string(), "0.0");
 
-        // An EV charger meter (id 2) with two EV chargers (ids 3, 4).
-        let meter_ev_charger_chain = builder.meter_ev_charger_chain(2);
-        builder.connect(grid_meter, meter_ev_charger_chain);
-
-        let graph = builder.build(None)?;
+        // An EV charger meter with two EV chargers.
+        let g = graph! { 0: grid => { 1: meter => { 2: meter => { 3: ev, 4: ev } } } };
+        let graph = g.build(None)?;
         assert_eq!(
             graph.ev_charger_formula(None)?.to_string(),
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
@@ -147,7 +131,7 @@ mod tests {
         );
 
         // The per-category override flips the meter-vs-component preference.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
@@ -174,20 +158,13 @@ mod tests {
 
     #[test]
     fn test_pv_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // No PV inverters in the graph.
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         assert_eq!(graph.pv_formula(None)?.to_string(), "0.0");
 
-        // A PV meter (id 2) with two PV inverters (ids 3, 4).
-        let meter_pv_chain = builder.meter_pv_chain(2);
-        builder.connect(grid_meter, meter_pv_chain);
-
-        let graph = builder.build(None)?;
+        // A PV meter with two PV inverters.
+        let g = graph! { 0: grid => { 1: meter => { 2: meter => { 3: inv_pv, 4: inv_pv } } } };
+        let graph = g.build(None)?;
         assert_eq!(
             graph.pv_formula(None)?.to_string(),
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
@@ -198,7 +175,7 @@ mod tests {
         );
 
         // The per-category override flips the meter-vs-component preference.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
@@ -225,20 +202,13 @@ mod tests {
 
     #[test]
     fn test_steam_boiler_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // No steam boilers in the graph.
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         assert_eq!(graph.steam_boiler_formula(None)?.to_string(), "0.0");
 
-        // A steam boiler meter (id 2) with two steam boilers (ids 3, 4).
-        let meter_steam_boiler_chain = builder.meter_steam_boiler_chain(2);
-        builder.connect(grid_meter, meter_steam_boiler_chain);
-
-        let graph = builder.build(None)?;
+        // A steam boiler meter with two steam boilers.
+        let g = graph! { 0: grid => { 1: meter => { 2: meter => { 3: boiler, 4: boiler } } } };
+        let graph = g.build(None)?;
         assert_eq!(
             graph.steam_boiler_formula(None)?.to_string(),
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
@@ -251,7 +221,7 @@ mod tests {
         );
 
         // The per-category override flips the meter-vs-component preference.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()
@@ -278,20 +248,13 @@ mod tests {
 
     #[test]
     fn test_wind_turbine_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
         // No wind turbines in the graph.
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         assert_eq!(graph.wind_turbine_formula(None)?.to_string(), "0.0");
 
-        // A wind turbine meter (id 2) with two wind turbines (ids 3, 4).
-        let meter_wind_turbine_chain = builder.meter_wind_turbine_chain(2);
-        builder.connect(grid_meter, meter_wind_turbine_chain);
-
-        let graph = builder.build(None)?;
+        // A wind turbine meter with two wind turbines.
+        let g = graph! { 0: grid => { 1: meter => { 2: meter => { 3: wind, 4: wind } } } };
+        let graph = g.build(None)?;
         assert_eq!(
             graph.wind_turbine_formula(None)?.to_string(),
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
@@ -304,7 +267,7 @@ mod tests {
         );
 
         // The per-category override flips the meter-vs-component preference.
-        let graph = builder.build(Some(
+        let graph = g.build(Some(
             ComponentGraphConfig::builder()
                 .formula_overrides(
                     FormulaOverrides::builder()

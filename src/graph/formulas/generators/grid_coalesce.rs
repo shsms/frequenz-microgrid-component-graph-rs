@@ -56,60 +56,61 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::test_utils::ComponentGraphBuilder;
+    use crate::graph::test_utils::graph;
 
     #[test]
     fn test_grid_voltage_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        // Add a grid meter and a battery chain behind it.
-        let grid_meter = builder.meter();
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid, grid_meter);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        let graph = builder.build(None)?;
+        // A grid meter and a battery chain behind it.
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_coalesce_formula()?.to_string();
         assert_eq!(formula, "#1");
 
-        // Add an additional dangling meter, and a PV chain and a battery chain
-        // to the grid
-        let dangling_meter = builder.meter();
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        let meter_pv_chain = builder.meter_pv_chain(1);
-        builder.connect(grid, dangling_meter);
-        builder.connect(grid, meter_bat_chain);
-        builder.connect(grid, meter_pv_chain);
-
-        assert_eq!(dangling_meter.component_id(), 5);
-        assert_eq!(meter_bat_chain.component_id(), 6);
-        assert_eq!(meter_pv_chain.component_id(), 9);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+                // An additional dangling meter, and a PV chain and a battery
+                // chain on the grid.
+                5: meter,
+                6: meter => { 7: inv_bat => { 8: bat } },
+                9: meter => { 10: inv_pv },
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_coalesce_formula()?.to_string();
         assert_eq!(formula, "COALESCE(#9, #6, #5, #1)");
 
-        // Add a PV inverter to the grid, without a meter.
-        let pv_inverter = builder.solar_inverter();
-        builder.connect(grid, pv_inverter);
-
-        assert_eq!(pv_inverter.component_id(), 11);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+                5: meter,
+                6: meter => { 7: inv_bat => { 8: bat } },
+                9: meter => { 10: inv_pv },
+                // A PV inverter on the grid, without a meter.
+                11: inv_pv,
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_coalesce_formula()?.to_string();
         assert_eq!(formula, "COALESCE(#11, #9, #6, #5, #1)");
 
-        // A PV inverter with no telemetry connected to the grid is skipped.
-        let pv_no_telemetry = builder.add_component_with_mode(
-            crate::ComponentCategory::Inverter(crate::InverterType::Pv),
-            crate::OperationalMode::ControlOnly,
-        );
-        builder.connect(grid, pv_no_telemetry);
-
-        assert_eq!(pv_no_telemetry.component_id(), 12);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_bat => { 4: bat } } },
+                5: meter,
+                6: meter => { 7: inv_bat => { 8: bat } },
+                9: meter => { 10: inv_pv },
+                11: inv_pv,
+                // A PV inverter with no telemetry connected to the grid is
+                // skipped.
+                12: inv_pv [ControlOnly],
+            },
+        }
+        .build(None)?;
         let formula = graph.grid_coalesce_formula()?.to_string();
         assert_eq!(formula, "COALESCE(#11, #9, #6, #5, #1)");
 

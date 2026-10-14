@@ -52,36 +52,33 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Error, graph::test_utils::ComponentGraphBuilder};
+    use crate::{Error, graph::test_utils::graph};
 
     #[test]
     fn test_producer_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        // Add a grid meter and a PV meter with two PV inverters behind it.
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(formula, "0.0");
 
-        let meter_pv_chain = builder.meter_pv_chain(2);
-        builder.connect(grid_meter, meter_pv_chain);
-
-        let graph = builder.build(None)?;
+        // A PV meter with two PV inverters behind the grid meter.
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: meter => { 3: inv_pv, 4: inv_pv } } },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
             "COALESCE(#4 + #3, #2, COALESCE(#4, 0.0) + COALESCE(#3, 0.0))"
         );
 
-        // Add a CHP meter to the grid with a CHP behind it.
-        let meter_chp_chain = builder.meter_chp_chain(1);
-        builder.connect(grid, meter_chp_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_pv, 4: inv_pv } },
+                // A CHP meter on the grid with a CHP behind it.
+                5: meter => { 6: chp },
+            },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -91,11 +88,15 @@ mod tests {
             )
         );
 
-        // Add a CHP to the grid, without a meter.
-        let chp = builder.chp();
-        builder.connect(grid, chp);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 2: meter => { 3: inv_pv, 4: inv_pv } },
+                5: meter => { 6: chp },
+                // A CHP on the grid, without a meter.
+                7: chp,
+            },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -106,11 +107,18 @@ mod tests {
             )
         );
 
-        // Add a PV inverter to the grid_meter.
-        let pv_inverter = builder.solar_inverter();
-        builder.connect(grid_meter, pv_inverter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv, 4: inv_pv },
+                    // A PV inverter on the grid meter.
+                    8: inv_pv,
+                },
+                5: meter => { 6: chp },
+                7: chp,
+            },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -122,11 +130,19 @@ mod tests {
             )
         );
 
-        // Add a battery chain to the grid meter.
-        let meter_bat_chain = builder.meter_bat_chain(1, 1);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv, 4: inv_pv },
+                    8: inv_pv,
+                    // A battery chain on the grid meter.
+                    9: meter => { 10: inv_bat => { 11: bat } },
+                },
+                5: meter => { 6: chp },
+                7: chp,
+            },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -138,18 +154,24 @@ mod tests {
             )
         );
 
-        // Add a meter to the grid meter, that has a PV inverter and a CHP
-        // behind it. The pair is measured by one term, as same-meter siblings
-        // of one category are, so the meter's reading stands in for the pair
-        // even when neither component sends data.
-        let meter = builder.meter();
-        let pv_inverter = builder.solar_inverter();
-        let chp = builder.chp();
-        builder.connect(meter, pv_inverter);
-        builder.connect(meter, chp);
-        builder.connect(grid_meter, meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv, 4: inv_pv },
+                    8: inv_pv,
+                    9: meter => { 10: inv_bat => { 11: bat } },
+                    // A meter on the grid meter, with a PV inverter and a CHP
+                    // behind it. The pair is measured by one term, as
+                    // same-meter siblings of one category are, so the meter's
+                    // reading stands in for the pair even when neither
+                    // component sends data.
+                    12: meter => { 13: inv_pv, 14: chp },
+                },
+                5: meter => { 6: chp },
+                7: chp,
+            },
+        }
+        .build(None)?;
         let formula = graph.producer_formula()?.to_string();
         assert_eq!(
             formula,
@@ -168,26 +190,15 @@ mod tests {
     /// A PV inverter shared by two PV meters is measured once, by its own
     /// reading with the meter diamond as fallback. Per-meter aggregation
     /// dropped the shared inverter from both meters' terms.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1 → {PV:3, PV:4}, Meter:2 →
-    /// {PV:4, PV:5}}`.
     #[test]
     fn test_producer_formula_measures_a_shared_inverter_once() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let left_meter = builder.meter();
-        let right_meter = builder.meter();
-        let left_pv = builder.solar_inverter();
-        let shared_pv = builder.solar_inverter();
-        let right_pv = builder.solar_inverter();
-        builder.connect(grid, left_meter);
-        builder.connect(grid, right_meter);
-        builder.connect(left_meter, left_pv);
-        builder.connect(left_meter, shared_pv);
-        builder.connect(right_meter, shared_pv);
-        builder.connect(right_meter, right_pv);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 3: inv_pv, 4: inv_pv },
+                2: meter => { 4, 5: inv_pv },
+            },
+        }
+        .build(None)?;
         assert_eq!(
             graph.producer_formula()?.to_string(),
             "COALESCE(#3 + #4 + #5, COALESCE(#1, 0.0) + COALESCE(#2, 0.0))"
@@ -199,24 +210,15 @@ mod tests {
     /// A PV inverter fed from two meters is not counted through both: its
     /// own reading covers both feeds. Per-meter aggregation added the
     /// pure-PV meter's reading on top of the inverter's.
-    ///
-    /// Topology (ids): `Grid:0 → {Meter:1 → PV:3, Meter:2 → {PV:3,
-    /// EV:4}}`.
     #[test]
     fn test_producer_formula_counts_a_double_fed_inverter_once() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let pv_meter = builder.meter();
-        let mixed_meter = builder.meter();
-        let pv = builder.solar_inverter();
-        let ev = builder.ev_charger();
-        builder.connect(grid, pv_meter);
-        builder.connect(grid, mixed_meter);
-        builder.connect(pv_meter, pv);
-        builder.connect(mixed_meter, pv);
-        builder.connect(mixed_meter, ev);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => { 3: inv_pv },
+                2: meter => { 3, 4: ev },
+            },
+        }
+        .build(None)?;
         assert_eq!(graph.producer_formula()?.to_string(), "COALESCE(#3, 0.0)");
 
         Ok(())

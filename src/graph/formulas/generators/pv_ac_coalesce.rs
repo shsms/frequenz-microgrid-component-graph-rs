@@ -84,51 +84,44 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{
-        ComponentCategory, Error, InverterType, OperationalMode,
-        graph::test_utils::ComponentGraphBuilder,
-    };
+    use crate::{Error, graph::test_utils::graph};
 
     #[test]
     fn test_pv_ac_coalesce_formula() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: meter } }.build(None)?;
         let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
         assert_eq!(formula, "None");
 
-        // Add a PV meter with one PV inverter.
-        let meter_pv_chain = builder.meter_pv_chain(1);
-        builder.connect(grid_meter, meter_pv_chain);
-
-        assert_eq!(grid_meter.component_id(), 1);
-        assert_eq!(meter_pv_chain.component_id(), 2);
-
-        let graph = builder.build(None)?;
+        // A PV meter with one PV inverter.
+        let graph =
+            graph! { 0: grid => { 1: meter => { 2: meter => { 3: inv_pv } } } }.build(None)?;
         let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#2, #3)");
 
-        // Add a battery meter with one inverter and two batteries.
-        let meter_bat_chain = builder.meter_bat_chain(1, 2);
-        builder.connect(grid_meter, meter_bat_chain);
-
-        assert_eq!(meter_bat_chain.component_id(), 4);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv },
+                    // A battery meter with one inverter and two batteries.
+                    4: meter => { 5: inv_bat => { 6: bat, 7: bat } },
+                },
+            },
+        }
+        .build(None)?;
         let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#2, #3)");
 
-        // Add a PV meter with two PV inverters.
-        let meter_pv_chain = builder.meter_pv_chain(2);
-        builder.connect(grid_meter, meter_pv_chain);
-
-        assert_eq!(meter_pv_chain.component_id(), 8);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv },
+                    4: meter => { 5: inv_bat => { 6: bat, 7: bat } },
+                    // A PV meter with two PV inverters.
+                    8: meter => { 9: inv_pv, 10: inv_pv },
+                },
+            },
+        }
+        .build(None)?;
         let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#2, #8, #3, #9, #10)");
 
@@ -137,13 +130,18 @@ mod tests {
             .to_string();
         assert_eq!(formula, "COALESCE(#2, #8, #3, #10)");
 
-        // add a meter direct to the grid with three PV inverters
-        let meter_pv_chain = builder.meter_pv_chain(3);
-        builder.connect(grid, meter_pv_chain);
-
-        assert_eq!(meter_pv_chain.component_id(), 11);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => {
+                1: meter => {
+                    2: meter => { 3: inv_pv },
+                    4: meter => { 5: inv_bat => { 6: bat, 7: bat } },
+                    8: meter => { 9: inv_pv, 10: inv_pv },
+                },
+                // A meter directly on the grid with three PV inverters.
+                11: meter => { 12: inv_pv, 13: inv_pv, 14: inv_pv },
+            },
+        }
+        .build(None)?;
         let formula = graph.pv_ac_coalesce_formula(None)?.to_string();
         assert_eq!(formula, "COALESCE(#2, #8, #11, #3, #9, #10, #12, #13, #14)");
 
@@ -174,26 +172,12 @@ mod tests {
 
     /// A PV inverter that provides no telemetry is dropped from the coalesce,
     /// while the PV meter measuring it stays.
-    ///
-    /// Topology (ids): `Grid:0 → Meter:1 → PVMeter:2 → {PV:3, PV:4 (no
-    /// telemetry)}`.
     #[test]
     fn test_pv_ac_coalesce_skips_no_telemetry() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let grid_meter = builder.meter();
-        builder.connect(grid, grid_meter);
-        let pv_meter = builder.meter();
-        builder.connect(grid_meter, pv_meter);
-        let pv = builder.solar_inverter();
-        let pv_no_telemetry = builder.add_component_with_mode(
-            ComponentCategory::Inverter(InverterType::Pv),
-            OperationalMode::ControlOnly,
-        );
-        builder.connect(pv_meter, pv);
-        builder.connect(pv_meter, pv_no_telemetry);
-
-        let graph = builder.build(None)?;
+        let graph = graph! {
+            0: grid => { 1: meter => { 2: meter => { 3: inv_pv, 4: inv_pv [ControlOnly] } } },
+        }
+        .build(None)?;
         // #4 is dropped; the PV meter #2 and the reporting inverter #3 remain.
         assert_eq!(
             graph.pv_ac_coalesce_formula(None)?.to_string(),
@@ -204,19 +188,9 @@ mod tests {
 
     /// When every source component provides no telemetry, nothing is left to
     /// coalesce and the formula is `None`.
-    ///
-    /// Topology (ids): `Grid:0 → PV:1 (no telemetry)`.
     #[test]
     fn test_pv_ac_coalesce_all_no_telemetry() -> Result<(), Error> {
-        let mut builder = ComponentGraphBuilder::new();
-        let grid = builder.grid();
-        let pv_no_telemetry = builder.add_component_with_mode(
-            ComponentCategory::Inverter(InverterType::Pv),
-            OperationalMode::ControlOnly,
-        );
-        builder.connect(grid, pv_no_telemetry);
-
-        let graph = builder.build(None)?;
+        let graph = graph! { 0: grid => { 1: inv_pv [ControlOnly] } }.build(None)?;
         assert_eq!(graph.pv_ac_coalesce_formula(None)?.to_string(), "None");
         Ok(())
     }
