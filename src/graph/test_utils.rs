@@ -11,7 +11,7 @@
 
 use crate::{
     BatteryType, ComponentCategory, ComponentGraph, ComponentGraphConfig, Edge, Error,
-    EvChargerType, InverterType, Node, OperationalMode, ValidationError,
+    InverterType, Node, OperationalMode, ValidationError,
 };
 
 /// Builds the [`Error`] that validation returns when it collects a single
@@ -299,24 +299,9 @@ impl ComponentGraphBuilder {
         self.add_component(ComponentCategory::Inverter(InverterType::Pv))
     }
 
-    /// Adds an EV charger to the graph and returns its handle.
-    pub(super) fn ev_charger(&mut self) -> ComponentHandle {
-        self.add_component(ComponentCategory::EvCharger(EvChargerType::Ac))
-    }
-
     /// Adds a CHP to the graph and returns its handle.
     pub(super) fn chp(&mut self) -> ComponentHandle {
         self.add_component(ComponentCategory::Chp)
-    }
-
-    /// Adds a wind_turbine to the graph and returns its handle.
-    pub(super) fn wind_turbine(&mut self) -> ComponentHandle {
-        self.add_component(ComponentCategory::WindTurbine)
-    }
-
-    /// Adds a steam boiler to the graph and returns its handle.
-    pub(super) fn steam_boiler(&mut self) -> ComponentHandle {
-        self.add_component(ComponentCategory::SteamBoiler)
     }
 
     /// Connects two components in the graph.
@@ -369,50 +354,6 @@ impl ComponentGraphBuilder {
         for _ in 0..num_inverters {
             let inverter = self.solar_inverter();
             self.connect(meter, inverter);
-        }
-        meter
-    }
-
-    /// Adds a meter, followed by the given number of CHPs, and returns a
-    /// handle to the meter.
-    pub(super) fn meter_chp_chain(&mut self, num_chp: usize) -> ComponentHandle {
-        let meter = self.meter();
-        for _ in 0..num_chp {
-            let chp = self.chp();
-            self.connect(meter, chp);
-        }
-        meter
-    }
-
-    /// Adds a meter, followed by the given number of EV chargers, and returns a
-    /// handle to the meter.
-    pub(super) fn meter_ev_charger_chain(&mut self, num_ev_chargers: usize) -> ComponentHandle {
-        let meter = self.meter();
-        for _ in 0..num_ev_chargers {
-            let ev_charger = self.ev_charger();
-            self.connect(meter, ev_charger);
-        }
-        meter
-    }
-
-    /// Adds a meter, followed by the given number of wind turbines, and
-    /// returns a handle to the meter.
-    pub(super) fn meter_wind_turbine_chain(&mut self, num_wind_turbines: usize) -> ComponentHandle {
-        let meter = self.meter();
-        for _ in 0..num_wind_turbines {
-            let wind_turbine = self.wind_turbine();
-            self.connect(meter, wind_turbine);
-        }
-        meter
-    }
-
-    /// Adds a meter, followed by the given number of steam boilers, and
-    /// returns a handle to the meter.
-    pub(super) fn meter_steam_boiler_chain(&mut self, num_steam_boilers: usize) -> ComponentHandle {
-        let meter = self.meter();
-        for _ in 0..num_steam_boilers {
-            let steam_boiler = self.steam_boiler();
-            self.connect(meter, steam_boiler);
         }
         meter
     }
