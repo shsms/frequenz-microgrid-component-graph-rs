@@ -20,7 +20,8 @@ pub enum ErrorKind {
     /// An internal invariant of the library was violated. This indicates a bug.
     Internal,
 
-    /// A component is invalid, e.g. it has an unspecified category.
+    /// A component is invalid, e.g. it has an unspecified category and a
+    /// connection.
     InvalidComponent,
 
     /// A connection between two components is invalid.

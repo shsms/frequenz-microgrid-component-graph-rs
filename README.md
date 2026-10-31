@@ -28,11 +28,12 @@ Check the rustdoc for these traits for sample implementations.
 ## Validation
 
 [`try_new`][`ComponentGraph::try_new`] returns an [`Error`] unless the
-input graph has exactly one root (a [`GridConnectionPoint`]), is fully
-connected, acyclic, and obeys the per-category neighbor rules (e.g. a
-battery has a battery inverter predecessor and no successors). Selected
-checks downgrade to a `tracing::warn!` when the corresponding `allow_*`
-flag is set on the config.
+input graph has exactly one root (a [`GridConnectionPoint`]), connects
+every component except pass-through ones to that root, is acyclic, and
+obeys the per-category neighbor rules (e.g. a battery has a battery
+inverter predecessor and no successors). Selected checks downgrade to a
+`tracing::warn!` when the corresponding `allow_*` flag is set on the
+config.
 
 ## Pass-through components
 
@@ -46,9 +47,15 @@ The raw graph view, including pass-through nodes, is available via
 [`ComponentGraph::try_new`] emits a `tracing::warn!` for each
 pass-through node so operators know what is being elided.
 
+[`ComponentGraph::try_new`] returns an error for a component of category
+`Unspecified` that has a connection, because formulas could miss its
+power. Without connections, the component is a pass-through.
+
 > **Warning:** Pass-through behavior exists for forward compatibility —
 > when new component categories are introduced, the library treats it
 > as transparent rather than failing validation of the whole graph.
+> A component that a [`Node`] reports as `Unspecified` is transparent
+> only if it has no connections.
 >
 > The trade-off is that a real misclassification can slip through
 > unnoticed if the `tracing::warn!` output isn't being read; operators

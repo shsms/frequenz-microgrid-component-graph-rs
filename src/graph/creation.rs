@@ -18,6 +18,10 @@ where
 {
     /// Creates a new [`ComponentGraph`] from the given components and connections.
     ///
+    /// A component of category `Unspecified` is accepted only if it has no
+    /// connections. It then stays in the graph, but aggregate and per-category
+    /// formulas leave it out.
+    ///
     /// Returns an error if the graph is invalid.
     pub fn try_new<NodeIterator: IntoIterator<Item = N>, EdgeIterator: IntoIterator<Item = E>>(
         components: NodeIterator,
@@ -81,11 +85,6 @@ where
         for component in components {
             let cid = component.component_id();
 
-            if component.is_unspecified() {
-                return Err(Error::invalid_component(format!(
-                    "ComponentCategory not specified for component: {cid}"
-                )));
-            }
             if component.is_unspecified_inverter(config) {
                 return Err(Error::invalid_component(format!(
                     "InverterType not specified for inverter: {cid}"
@@ -115,9 +114,16 @@ where
                 )));
             }
             for cid in [sid, did] {
-                if !self.node_indices.contains_key(&cid) {
+                let Some(&idx) = self.node_indices.get(&cid) else {
                     return Err(Error::invalid_connection(format!(
                         "Connection:({sid}, {did}) Can't find a component with ID {cid}"
+                    )));
+                };
+                // An `Unspecified` component can't have a connection: it could
+                // be of any category, so formulas could miss its power.
+                if self.graph[idx].is_unspecified() {
+                    return Err(Error::invalid_component(format!(
+                        "ComponentCategory not specified for component: {cid}"
                     )));
                 }
             }
@@ -175,20 +181,13 @@ mod tests {
         );
 
         builder.pop_component();
-        builder.add_component(ComponentCategory::Unspecified);
-        assert!(
-            builder.build(None).is_err_and(|e| e
-                == Error::invalid_component("ComponentCategory not specified for component: 8"))
-        );
-
-        builder.pop_component();
         let unspec_inv =
             builder.add_component(ComponentCategory::Inverter(InverterType::Unspecified));
         builder.connect(grid_meter, unspec_inv);
 
         // With default config, unspecified inverter types are not accepted.
         assert!(builder.build(None).is_err_and(
-            |e| e == Error::invalid_component("InverterType not specified for inverter: 9")
+            |e| e == Error::invalid_component("InverterType not specified for inverter: 8")
         ));
         // With `allow_unspecified_inverters=true`, unspecified inverter types
         // are treated as battery inverters.
@@ -214,6 +213,35 @@ mod tests {
 
         builder.pop_component();
         assert!(builder.build(None).is_ok());
+    }
+
+    #[test]
+    fn test_unspecified_component_connections() -> Result<(), Error> {
+        let (mut builder, grid_meter) = nodes_and_edges();
+        let grid = builder.grid();
+        builder.connect(grid, grid_meter);
+        let consumer_formula = builder.build(None)?.consumer_formula()?.to_string();
+
+        // Without connections, it stays in the graph and the consumer formula
+        // doesn't change.
+        let unspecified = builder.add_component(ComponentCategory::Unspecified);
+        let graph = builder.build(None)?;
+        assert!(
+            graph
+                .components()
+                .any(|c| c.component_id() == unspecified.component_id())
+        );
+        assert_eq!(graph.consumer_formula()?.to_string(), consumer_formula);
+
+        // With a connection in either direction, it is rejected.
+        for (source, destination) in [(grid_meter, unspecified), (unspecified, grid_meter)] {
+            builder.connect(source, destination);
+            assert!(builder.build(None).is_err_and(|e| e
+                == Error::invalid_component("ComponentCategory not specified for component: 8")));
+            builder.pop_connection();
+        }
+
+        Ok(())
     }
 
     #[test]

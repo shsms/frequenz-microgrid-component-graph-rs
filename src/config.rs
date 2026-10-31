@@ -147,6 +147,8 @@ impl ComponentGraphConfigBuilder {
 
     /// When `true`, components that are not reachable from the root are
     /// permitted; otherwise the graph fails to build.
+    /// [Pass-through components](crate#pass-through-components) never have to
+    /// be reachable.
     pub fn allow_unconnected_components(mut self, value: bool) -> Self {
         self.inner.allow_unconnected_components = value;
         self

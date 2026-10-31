@@ -136,14 +136,16 @@ impl ComponentCategory {
     /// and neighbor relationships across them are evaluated by walking
     /// past them as if they weren't present.
     ///
-    /// `Unspecified` is intentionally not a pass-through: it's rejected
-    /// at graph-construction time before validators or formula
-    /// generators ever see it.
+    /// `Unspecified` is a pass-through so that a component of this category
+    /// with no connections is exempt from the connectedness check and gets the
+    /// pass-through warning. It can't sit in a chain: graph construction
+    /// rejects an `Unspecified` component that has connections.
     pub(crate) fn is_passthrough(self) -> bool {
         use ComponentCategory as C;
         matches!(
             self,
-            C::Converter
+            C::Unspecified
+                | C::Converter
                 | C::Breaker
                 | C::Precharger
                 | C::Electrolyzer
@@ -248,8 +250,10 @@ mod tests {
     #[test]
     fn test_is_passthrough_classification() {
         // Pass-through categories: no specific validation rule, no formula
-        // contribution; transparent to traversal.
+        // contribution; transparent to traversal. `Unspecified` has one rule:
+        // it can't have connections.
         for c in [
+            ComponentCategory::Unspecified,
             ComponentCategory::Converter,
             ComponentCategory::Breaker,
             ComponentCategory::Precharger,
@@ -267,7 +271,6 @@ mod tests {
 
         // Handled or special-cased categories.
         for c in [
-            ComponentCategory::Unspecified,
             ComponentCategory::GridConnectionPoint,
             ComponentCategory::Meter,
             ComponentCategory::Inverter(InverterType::Battery),
